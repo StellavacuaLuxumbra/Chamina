@@ -1,0 +1,31 @@
+[package]
+name = "chamina"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Code-driven 3D text PV library. Declare scenes/text/animation in Rust, compute glyph meshes and animation curves, export a JSON scene for a JS renderer."
+keywords = ["text", "3d", "typography", "cjk", "animation"]
+categories = ["multimedia::video", "game-engines", "graphics"]
+readme = "README.md"
+
+[dependencies]
+# Text / geometry
+ttf-parser = "0.25"
+# 2D polygon tessellation (glyph outlines -> triangles), incl. holes/Euler paths.
+lyon = "1.0"
+# Serialization for the JS-renderer bridge.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Errors
+thiserror = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.dev]
+opt-level = 1
+
+[lints.rust]
+unsafe_code = "forbid"

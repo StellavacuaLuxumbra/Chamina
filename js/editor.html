@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>chamina 编辑器</title>
+<style>
+  :root {
+    --bg: #0b0d16; --panel: #121524; --line: #232840; --fg: #dfe4f5;
+    --dim: #8a92b4; --accent: #6bd9ff; --gold: #ffd166; --bad: #ff5f7a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 14px; margin: 0 10px 0 0; color: var(--accent); font-weight: 600; }
+  button, select, input, textarea {
+    background: #1a1f33; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #123; border-color: var(--accent); color: var(--accent); }
+  select, input[type=number], input[type=text] { padding: 4px 6px; }
+  input[type=number] { width: 74px; }
+  #bar { flex: 1; height: 6px; background: #1a1f33; border-radius: 3px;
+    overflow: hidden; min-width: 120px; }
+  #bar > i { display: block; height: 100%; width: 0; background: var(--accent);
+    transition: width .2s; }
+  #main { flex: 1; display: grid; grid-template-columns: 300px 1fr 400px; min-height: 0; }
+  section { display: flex; flex-direction: column; min-height: 0; min-width: 0;
+    background: var(--panel); border-right: 1px solid var(--line); }
+  section:last-child { border-right: 0; }
+  h2 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim); margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .body { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+  textarea { width: 100%; resize: none; font: 12px/1.5 Consolas, monospace;
+    white-space: pre; overflow: auto; }
+  #lrc { height: 40%; min-height: 140px; }
+  #json { flex: 1; min-height: 0; white-space: pre; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .row label { color: var(--dim); }
+  .hint { color: var(--dim); font-size: 11px; }
+  #stage { position: relative; background: #000; flex: 1; min-height: 0; }
+  #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #timeline { display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+    background: var(--panel); border-top: 1px solid var(--line); }
+  #scrub { flex: 1; }
+  #log { height: 132px; overflow: auto; margin: 0; padding: 8px 10px;
+    font: 11px/1.45 Consolas, monospace; color: var(--dim);
+    background: #0d1020; border-top: 1px solid var(--line); white-space: pre-wrap; }
+  #log b { color: var(--accent); font-weight: 600; }
+  #log .err { color: var(--bad); }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>chamina</h1>
+  <select id="sceneSel"></select>
+  <button id="btnNew">新建</button>
+  <button id="btnSave" class="primary">保存</button>
+  <button id="btnExport">导出预览</button>
+  <button id="btnRender">渲染 MP4</button>
+  <select id="audioSel" title="配乐"></select>
+  <button id="btnMux">合成音频</button>
+  <div id="bar"><i></i></div>
+  <span id="status" class="hint">就绪</span>
+</header>
+
+<div id="main">
+  <section>
+    <h2>歌词</h2>
+    <div class="body">
+      <textarea id="lrc" placeholder="把 LRC 粘到这里
+[00:09.00][00:33.00]愿你所愿皆成真
+[00:13.50]走过的路都算数"></textarea>
+      <button id="btnLyrics">生成歌词文本</button>
+      <div class="row">
+        <label>字号</label><input type="number" id="lySize" value="1.7" step="0.1">
+        <label>Y</label><input type="number" id="lyY" value="-0.3" step="0.1">
+      </div>
+      <div class="row">
+        <label>颜色</label><input type="text" id="lyColor" value="#eafcff" size="8">
+        <label>描边</label><input type="text" id="lyOutline" value="#6bd9ff" size="8">
+      </div>
+      <div class="row">
+        <label>入场</label>
+        <select id="lyEntrance">
+          <option value="slide" selected>slide</option>
+          <option value="fall">fall</option>
+          <option value="none">none</option>
+        </select>
+        <label>淡入</label><input type="number" id="lyIn" value="0.3" step="0.05">
+        <label>淡出</label><input type="number" id="lyOut" value="0.45" step="0.05">
+      </div>
+      <div class="row">
+        <label>标题</label><input type="text" id="lyTitle" value="" size="14">
+        <label>副标题</label><input type="text" id="lySubtitle" value="" size="18">
+      </div>
+      <div class="hint">生成后会覆盖场景里的 <code>texts</code> 和 <code>duration</code>，
+        相机与辉光按长镜头自动调整；点「保存」再「导出预览」。</div>
+      <div class="row">
+        <label>bloom</label><input type="number" id="lyBloom" value="0.06" step="0.01">
+        <label>摇摆</label><input type="number" id="lyDrift" value="0.6" step="0.1">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>预览</h2>
+    <div id="stage"><iframe id="preview" src="/scene.html"></iframe></div>
+    <div id="timeline">
+      <button id="btnPlay">▶</button>
+      <input type="range" id="scrub" min="0" max="7" step="0.01" value="0">
+      <span id="tlabel" class="hint">0.00 / 7.0</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>场景 JSON</h2>
+    <div class="body">
+      <textarea id="json" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="btnApply" class="primary">应用到预览</button>
+        <span id="dirty" class="hint"></span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<pre id="log"></pre>
+
+<script type="module">
+import { lyricsToScene, buildTitleBlock, visibleWidth } from '/lrc.js';
+
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const state = { name: null, scene: null, t: 0, playing: false, raf: 0, last: 0 };
+
+function log(msg, cls) {
+  const line = document.createElement(cls ? 'span' : 'div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  while (logEl.children.length > 400) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const setStatus = (s) => { $('status').textContent = s; };
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const text = await r.text();
+  let body;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  if (!r.ok && !opts.allowError) {
+    throw new Error(body.error || body.log || `HTTP ${r.status}`);
+  }
+  return body;
+}
+
+// --- scene list -----------------------------------------------------------
+async function refreshScenes(selectName) {
+  const list = await api('/api/scenes');
+  const sel = $('sceneSel');
+  sel.innerHTML = '';
+  for (const s of list) {
+    const o = document.createElement('option');
+    o.value = s.name;
+    o.textContent = `${s.name}  (${(s.size / 1024).toFixed(0)} KB)`;
+    sel.appendChild(o);
+  }
+  const want = selectName || list[0]?.name;
+  if (want && [...sel.options].some((o) => o.value === want)) sel.value = want;
+  return sel.value || null;
+}
+
+// --- audio list -----------------------------------------------------------
+async function refreshAudio() {
+  let list = [];
+  try { list = await api('/api/audio'); } catch (e) { log('音频列表失败: ' + e.message, 'err'); }
+  const sel = $('audioSel');
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = list.length ? '配乐…' : '（无音频）';
+  sel.appendChild(none);
+  for (const a of list) {
+    const o = document.createElement('option');
+    o.value = a.rel;
+    o.textContent = a.name;
+    sel.appendChild(o);
+  }
+  return sel.value;
+}
+
+async function loadScene(name) {
+  if (!name) { state.scene = null; $('json').value = ''; return; }
+  const text = await (await fetch(`/api/scene?name=${encodeURIComponent(name)}`)).text();
+  state.scene = JSON.parse(text);
+  state.name = name;
+  $('json').value = JSON.stringify(state.scene, null, 2);
+  $('dirty').textContent = '';
+  syncTimeline();
+  // The preview renders scene_data.json, not the scene file, so a switch is
+  // only visible after the Rust exporter has run. One silent export on open
+  // saves the user from wondering why the stage is empty.
+  try { await exportAndReload(); } catch (e) { log('导出失败: ' + (e.message || e), 'err'); }
+}
+
+function syncTimeline() {
+  const d = Number(state.scene?.duration) || 7;
+  $('scrub').max = d;
+  $('tlabel').textContent = `${state.t.toFixed(2)} / ${d.toFixed(1)}`;
+}
+
+function readJsonBox() {
+  const raw = $('json').value;
+  const parsed = JSON.parse(raw);       // throws with a useful message
+  state.scene = parsed;
+  return parsed;
+}
+
+// --- preview ---------------------------------------------------------------
+async function setFrame(t) {
+  state.t = Math.max(0, Math.min(Number(t) || 0, Number(state.scene?.duration) || 7));
+  $('scrub').value = state.t;
+  syncTimeline();
+  const win = $('preview').contentWindow;
+  if (win && typeof win.setFrame === 'function') {
+    try { await win.setFrame(state.t); } catch (e) { /* rebuilding */ }
+  }
+}
+
+function reloadPreview() {
+  $('preview').src = '/scene.html?v=' + Date.now();
+}
+
+function playLoop(now) {
+  if (!state.playing) return;
+  const dt = (now - state.last) / 1000;
+  state.last = now;
+  let t = state.t + dt;
+  const d = Number(state.scene?.duration) || 7;
+  if (t >= d) t = 0;
+  setFrame(t);
+  state.raf = requestAnimationFrame(playLoop);
+}
+
+$('btnPlay').onclick = () => {
+  state.playing = !state.playing;
+  $('btnPlay').textContent = state.playing ? '❚❚' : '▶';
+  if (state.playing) { state.last = performance.now(); state.raf = requestAnimationFrame(playLoop); }
+  else cancelAnimationFrame(state.raf);
+};
+$('scrub').oninput = (e) => { state.playing = false; $('btnPlay').textContent = '▶'; setFrame(e.target.value); };
+
+// --- save / export / render -------------------------------------------------
+$('btnSave').onclick = async () => {
+  try {
+    readJsonBox();
+    await api(`/api/scene?name=${encodeURIComponent(state.name)}`, {
+      method: 'PUT', body: JSON.stringify(state.scene, null, 2),
+    });
+    $('dirty').textContent = '';
+    setStatus('已保存');
+    log(`saved ${state.name}.json`);
+    await refreshScenes(state.name);
+  } catch (e) { setStatus('保存失败'); log(String(e.message || e), 'err'); }
+};
+
+$('btnApply').onclick = async () => {
+  try { readJsonBox(); $('dirty').textContent = '未保存'; setStatus('已应用'); setFrame(state.t); }
+  catch (e) { log('JSON 错误: ' + e.message, 'err'); }
+};
+$('json').oninput = () => { $('dirty').textContent = '未保存'; };
+
+async function exportAndReload() {
+  setStatus('导出中…');
+  const r = await api(`/api/export?name=${encodeURIComponent(state.name)}`, { method: 'POST' });
+  const written = r.lines.find((l) => l.includes('wrote')) || r.lines.join(' ');
+  log(written);
+  reloadPreview();
+  await new Promise((r2) => setTimeout(r2, 250));
+  setStatus('预览已更新');
+  return r;
+}
+$('btnExport').onclick = async () => {
+  try { await exportAndReload(); } catch (e) { setStatus('导出失败'); log(String(e.message || e), 'err'); }
+};
+
+$('btnRender').onclick = async () => {
+  try {
+    readJsonBox();
+    await api(`/api/scene?name=${encodeURIComponent(state.name)}`, {
+      method: 'PUT', body: JSON.stringify(state.scene, null, 2),
+    });
+  } catch (e) { return log(String(e.message || e), 'err'); }
+
+  $('btnRender').disabled = true;
+  setStatus('渲染中…');
+  const bar = $('#bar > i');
+  bar.style.width = '0%';
+  const es = new EventSource(
+    `/api/render?name=${encodeURIComponent(state.name)}` +
+      ($('audioSel').value ? `&audio=${encodeURIComponent($('audioSel').value)}` : ''),
+  );
+  es.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { msg = ev.data; }
+    if (msg && msg.done) {
+      es.close();
+      $('btnRender').disabled = false;
+      if (msg.code === 0) { setStatus('完成'); log(`done -> ${msg.out}`); bar.style.width = '100%'; }
+      else { setStatus('渲染失败'); log(msg.error || `exit ${msg.code}`, 'err'); }
+      return;
+    }
+    const line = String(msg);
+    log(line);
+    const m = /frame\s+(\d+)\/(\d+)/.exec(line);
+    if (m) {
+      const pct = (Number(m[1]) / Number(m[2])) * 100;
+      bar.style.width = pct.toFixed(1) + '%';
+      setStatus(`渲染中 ${m[1]}/${m[2]}`);
+    }
+  };
+  es.onerror = () => { es.close(); $('btnRender').disabled = false; setStatus('连接中断'); };
+};
+
+// Attach a soundtrack to the last finished render — cheap, no re-render.
+$('btnMux').onclick = async () => {
+  const audio = $('audioSel').value;
+  if (!audio) return setStatus('先选一段配乐');
+  if (!state.name) return setStatus('还没有场景');
+  $('btnMux').disabled = true;
+  setStatus('合成音频…');
+  try {
+    const r = await api(
+      `/api/mux?name=${encodeURIComponent(state.name)}&audio=${encodeURIComponent(audio)}`,
+      { method: 'POST' },
+    );
+    (r.lines || []).forEach((l) => log(l));
+    if (r.ok) { setStatus('已合成'); log(`done -> ${r.out}`); }
+    else { setStatus('合成失败'); log(r.log || `exit ${r.code}`, 'err'); }
+  } catch (e) { setStatus('合成失败'); log(String(e.message || e), 'err'); }
+  finally { $('btnMux').disabled = false; }
+};
+
+// --- lyrics -----------------------------------------------------------------
+$('btnLyrics').onclick = () => {
+  try {
+    const src = $('lrc').value;
+    if (!src.trim()) throw new Error('歌词是空的');
+    readJsonBox();
+    const scene = state.scene;
+    // Keep a margin: outline rim, bloom bleed and DOF softness all push a line
+    // past its advance width.
+    const fitWidth = visibleWidth(scene) * 0.85;
+    const out = lyricsToScene(src, {
+      size: Number($('lySize').value),
+      y: Number($('lyY').value),
+      color: $('lyColor').value.trim(),
+      outline: $('lyOutline').value.trim() || undefined,
+      entrance: $('lyEntrance').value,
+      fadeIn: Number($('lyIn').value),
+      fadeOut: Number($('lyOut').value),
+      fitWidth,
+      tail: 3,
+    });
+    if (!out.texts.length) throw new Error('没有解析到带时间戳的歌词行');
+    // `outline` is an lrc2scene concern, so apply it per line here.
+    const outline = $('lyOutline').value.trim();
+    if (outline) {
+      for (const t of out.texts) {
+        t.material.outline = { color: outline, width: 0.02, strength: 1 };
+      }
+    }
+
+    // Opening card: the track usually starts before the first timed line.
+    const cards = [];
+    const title = $('lyTitle').value.trim();
+    const subtitle = $('lySubtitle').value.trim();
+    if (title || subtitle) {
+      const firstCue = out.texts[0].animations.find((a) => a.type === 'fade').start_at;
+      const titleSize = Math.max(1.5, Number($('lySize').value) * 1.8);
+      const card = {
+        color: $('lyColor').value.trim(),
+        strength: 1.6,
+        outline: outline || undefined,
+        outlineWidth: 0.02,
+        startAt: 1.2,
+        outAt: Math.max(3.2, firstCue - 1.2),
+        entrance: $('lyEntrance').value === 'none' ? 'none' : 'slide',
+        stagger: 0.05,
+      };
+      cards.push(buildTitleBlock({
+        ...card, text: title, size: titleSize, y: 1.2, fitWidth: fitWidth * 0.72,
+      }));
+      cards.push(buildTitleBlock({
+        ...card, text: subtitle, size: titleSize / 3, y: -0.6,
+        strength: 1.1, fitWidth: fitWidth * 0.5, stagger: 0.03,
+      }));
+    }
+
+    scene.texts = [...cards.filter(Boolean), ...out.texts];
+    scene.duration = out.duration;
+
+    // Long scenes need a gentler camera than the gift-card preset.
+    const anim = scene.camera_animation;
+    if (anim && anim.type === 'orbit') {
+      const drift = Number($('lyDrift').value) || 0;
+      anim.start_yaw = Math.PI / 2 - drift / 2;
+      anim.speed = drift / Math.max(out.duration, 1e-3);
+    }
+    if (scene.bloom) scene.bloom.intensity = Number($('lyBloom').value) || 0;
+
+    $('json').value = JSON.stringify(scene, null, 2);
+    $('dirty').textContent = '未保存';
+    syncTimeline();
+    setFrame(0);
+    log(`歌词 → ${out.texts.length} 行 / ${out.duration}s` +
+      (cards.length ? ` + 标题卡 ${cards.filter(Boolean).length} 块` : '') +
+      '（记得保存 + 导出）');
+    setStatus('歌词已生成');
+  } catch (e) { log(String(e.message || e), 'err'); setStatus('歌词失败'); }
+};
+
+// --- boot --------------------------------------------------------------------
+$('sceneSel').onchange = (e) => loadScene(e.target.value);
+$('btnNew').onclick = async () => {
+  const name = prompt('新场景名（字母/数字/中文）');
+  if (!name) return;
+  const seed = state.scene || { width: 1920, height: 1080, fps: 60, duration: 7,
+    background: '#05060f', hdr: true, work_dir: 'target/chamina', texts: [] };
+  try {
+    await api(`/api/scene?name=${encodeURIComponent(name)}`, {
+      method: 'PUT', body: JSON.stringify({ ...seed, texts: [] }, null, 2),
+    });
+    await refreshScenes(name);
+    await loadScene(name);
+  } catch (e) { log(String(e.message || e), 'err'); }
+};
+
+(async () => {
+  try {
+    await refreshAudio();
+    const name = await refreshScenes();
+    await loadScene(name);
+    setFrame(0);
+    log(`editor ready — ${name}`);
+  } catch (e) { log(String(e.message || e), 'err'); }
+})();
+</script>
+</body>
+</html>

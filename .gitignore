@@ -13,5 +13,45 @@ target/
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
+#  option (not recommended) you can uncomment the following line to ignore the entire idea folder.
 #.idea/
+
+# ---------------------------------------------------------------------------
+# 机器本地构建配置（含 D:\ 绝对路径 / MinGW linker），不入库
+# ---------------------------------------------------------------------------
+/.cargo/
+
+# ---------------------------------------------------------------------------
+# 非 chamina 工程文件：礼物视频、音频素材、成片产物
+# ---------------------------------------------------------------------------
+/gift.mp4
+/*.mp3
+/*.mp4
+/out/
+*.mov
+*.mkv
+*.webm
+*.wav
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+*.log
+
+# ---------------------------------------------------------------------------
+# 渲染中间产物（若 target-dir 指到仓库内）
+# ---------------------------------------------------------------------------
+scene_data.json
+v4_p*.mp4
+concat.txt
+
+# ---------------------------------------------------------------------------
+# 系统 / 编辑器
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo

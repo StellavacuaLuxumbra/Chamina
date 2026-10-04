@@ -1,0 +1,2516 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "duration": 367,
+  "background": "#05060f",
+  "hdr": true,
+  "fxaa": false,
+  "work_dir": "target/chamina",
+  "font_fallback": [
+    "C:\\Windows\\Fonts\\msyh.ttc",
+    "C:\\Windows\\Fonts\\msyh.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf"
+  ],
+  "bloom": {
+    "enabled": true,
+    "intensity": 0.06,
+    "threshold": 1,
+    "scale": 1.2,
+    "high_quality": true
+  },
+  "dof": {
+    "enabled": true,
+    "focal_distance": 14,
+    "focal_radius": 1,
+    "sensor_height": 0.035,
+    "aperture_f_stops": 5.6
+  },
+  "camera": {
+    "fov": 0.8726646,
+    "near": 0.01,
+    "far": 500,
+    "hdr": true
+  },
+  "camera_animation": {
+    "type": "orbit",
+    "radius": 14,
+    "elevation": 0.09,
+    "speed": 0.0016348773841961851,
+    "start_yaw": 1.2707963267948965,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "movement": {
+      "ease": "ease_in_out_cubic",
+      "radius_end": 12.6,
+      "elevation_end": 0.22,
+      "at": 45,
+      "duration": 275
+    },
+    "shake": {
+      "amplitude": 0.03,
+      "frequency": 3,
+      "roll": 0.006,
+      "at": 0,
+      "until": null,
+      "ramp": 0.8
+    }
+  },
+  "lights": {
+    "key_color": "#fff5e6",
+    "key_illuminance": 3000,
+    "key_dir": [
+      0.6,
+      0.8,
+      0.5
+    ],
+    "rim_color": "#5a80ff",
+    "rim_illuminance": 1200,
+    "rim_dir": [
+      -0.4,
+      0.1,
+      -1
+    ],
+    "fill_color": "#d9e6ff",
+    "fill_illuminance": 600,
+    "fill_dir": [
+      -0.7,
+      0.2,
+      0.6
+    ],
+    "ambient_color": "#0a0a1a",
+    "ambient_brightness": 40
+  },
+  "seed": 12648430,
+  "texts": [
+    {
+      "text": "鸟之诗",
+      "size": 3,
+      "depth": 0.12,
+      "position": [
+        0,
+        1.2,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            0,
+            -1.6,
+            0
+          ],
+          "duration": 1.2,
+          "stagger": 0.05,
+          "ease": "ease_out_quad",
+          "start_at": 1.2
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.05,
+          "start_at": 1.2,
+          "fade_out_at": 15.375,
+          "fade_out": 0.9
+        }
+      ],
+      "fit_width": 12.785036414346122
+    },
+    {
+      "text": "中文版 feat. 重音テト · HANA",
+      "size": 1,
+      "depth": 0.12,
+      "position": [
+        0,
+        -0.6,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.1199999999999999,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            0,
+            -1.6,
+            0
+          ],
+          "duration": 1.2,
+          "stagger": 0.03,
+          "ease": "ease_out_quad",
+          "start_at": 1.2
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.03,
+          "start_at": 1.2,
+          "fade_out_at": 15.375,
+          "fade_out": 0.9
+        }
+      ],
+      "fit_width": 8.878497509962585
+    },
+    {
+      "text": "鸟之诗",
+      "size": 3,
+      "depth": 0.12,
+      "position": [
+        0,
+        1.2,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            0,
+            -1.6,
+            0
+          ],
+          "duration": 1.2,
+          "stagger": 0.05,
+          "ease": "ease_out_quad",
+          "start_at": 318
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.05,
+          "start_at": 318,
+          "fade_out_at": 365.5,
+          "fade_out": 1.4
+        }
+      ],
+      "fit_width": 12.785036414346122
+    },
+    {
+      "text": "中文版 feat. 重音テト · HANA",
+      "size": 1,
+      "depth": 0.12,
+      "position": [
+        0,
+        -0.6,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.1199999999999999,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            0,
+            -1.6,
+            0
+          ],
+          "duration": 1.2,
+          "stagger": 0.03,
+          "ease": "ease_out_quad",
+          "start_at": 318.35
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.03,
+          "start_at": 318.35,
+          "fade_out_at": 365.5,
+          "fade_out": 1.4
+        }
+      ],
+      "fit_width": 8.878497509962585
+    },
+    {
+      "text": "远离那些繁华悲伤 我们从此告别了过往",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 16.575
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 16.575,
+          "fade_out_at": 23.702,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 0,
+          "start_at": 16.975,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 16.575,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 24.152
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 24.152,
+          "fade_out_at": 30.698,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 1.7,
+          "start_at": 24.552,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 24.152,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 31.148
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 31.148,
+          "fade_out_at": 39.433,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 3.4,
+          "start_at": 31.548,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 31.148,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 39.883
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 39.883,
+          "fade_out_at": 53.234,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 5.1,
+          "start_at": 40.283,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 39.883,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "在初遇的那地方 我们曾眷恋不已 梦想",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 53.684
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 53.684,
+          "fade_out_at": 61.032,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 6.8,
+          "start_at": 54.084,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 53.684,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "面对迷惘 也不要放弃了希望",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 61.482
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 61.482,
+          "fade_out_at": 68.906,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 8.5,
+          "start_at": 61.882,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 61.482,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "就像是盛开的花 对阳光不变的那信仰",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 69.356
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 69.356,
+          "fade_out_at": 76.796,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 10.2,
+          "start_at": 69.756,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 69.356,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "天空里早已留下了 永恒的神话",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 77.246
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 77.246,
+          "fade_out_at": 83.897,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 11.9,
+          "start_at": 77.646,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 77.246,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "在夏天的操场 静静地眺望 在远方",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 84.347
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 84.347,
+          "fade_out_at": 91.619,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 13.6,
+          "start_at": 84.747,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 84.347,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "连绵不断 是回忆之间的海洋",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 92.069
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 92.069,
+          "fade_out_at": 99.627,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 15.3,
+          "start_at": 92.469,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 92.069,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "穿过云端 是谁的天堂 在召唤",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 100.077
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 100.077,
+          "fade_out_at": 107.495,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 17,
+          "start_at": 100.477,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 100.077,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "她在寻访 那沉睡千年的答案",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 107.945
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 107.945,
+          "fade_out_at": 114.268,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 18.7,
+          "start_at": 108.345,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 107.945,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "远离那些繁华悲伤 我们从此告别了过往",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 114.718
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 114.718,
+          "fade_out_at": 121.969,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 20.4,
+          "start_at": 115.118,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 114.718,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 122.419
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 122.419,
+          "fade_out_at": 128.913,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 22.1,
+          "start_at": 122.819,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 122.419,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 129.363
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 129.363,
+          "fade_out_at": 137.527,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 23.8,
+          "start_at": 129.763,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 129.363,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 137.977
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 137.977,
+          "fade_out_at": 167.312,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 25.5,
+          "start_at": 138.377,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 137.977,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "在告别的那地方 我们都无法放下的伤感",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 167.762
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 167.762,
+          "fade_out_at": 175.009,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 27.2,
+          "start_at": 168.162,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 167.762,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "挥一挥手留下的是美丽愿望",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 175.459
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 175.459,
+          "fade_out_at": 182.988,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 28.9,
+          "start_at": 175.859,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 175.459,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "就像是逆风的帆 对海浪不屈的那坚强",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 183.438
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 183.438,
+          "fade_out_at": 190.733,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 30.6,
+          "start_at": 183.838,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 183.438,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "天空里早已留下了 永恒的神话",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 191.183
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 191.183,
+          "fade_out_at": 198.164,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 32.3,
+          "start_at": 191.583,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 191.183,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "秋天的夜晚 静静地回想 在远方",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 198.614
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 198.614,
+          "fade_out_at": 205.831,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 34,
+          "start_at": 199.014,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 198.614,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "挥去不散 我们怀念着的故乡",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 206.281
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 206.281,
+          "fade_out_at": 213.741,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 35.7,
+          "start_at": 206.681,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 206.281,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "穿过云端 是谁的天堂 在召唤",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 214.191
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 214.191,
+          "fade_out_at": 221.525,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 37.4,
+          "start_at": 214.591,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 214.191,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "她在寻访 那沉睡千年的答案",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 221.975
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 221.975,
+          "fade_out_at": 228.461,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 39.1,
+          "start_at": 222.375,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 221.975,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "远离那些繁华悲伤 我们从此告别了过往",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 228.911
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 228.911,
+          "fade_out_at": 236.025,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 40.8,
+          "start_at": 229.311,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 228.911,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 236.475
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 236.475,
+          "fade_out_at": 242.962,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 42.5,
+          "start_at": 236.875,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 236.475,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 243.412
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 243.412,
+          "fade_out_at": 251.735,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 44.2,
+          "start_at": 243.812,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 243.412,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 252.185
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 252.185,
+          "fade_out_at": 263.671,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 45.9,
+          "start_at": 252.585,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 252.185,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "远离那些繁华悲伤 我们从此告别了过往",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 264.121
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 264.121,
+          "fade_out_at": 271.407,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 47.6,
+          "start_at": 264.521,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 264.121,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 271.857
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 271.857,
+          "fade_out_at": 278.243,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 49.3,
+          "start_at": 272.257,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 271.857,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "在我们身旁",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 278.693
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 278.693,
+          "fade_out_at": 280.574,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 51,
+          "start_at": 279.093,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 278.693,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "她的目光 飞翔在每个梦里的夜晚",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 281.024
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 281.024,
+          "fade_out_at": 287.219,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 52.7,
+          "start_at": 281.424,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 281.024,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    },
+    {
+      "text": "我们追随风的方向 遥远飞行地久天长 不返航",
+      "size": 1.7,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#eafcff",
+        "strength": 1.6,
+        "outline": {
+          "color": "#6bd9ff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 0.7,
+          "stagger": 0.06,
+          "ease": "ease_out_quad",
+          "start_at": 287.669
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 287.669,
+          "fade_out": 0.45,
+          "fade_out_at": 317.4
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 3,
+          "rotation": 0.01,
+          "phase": 54.4,
+          "start_at": 288.069,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.09,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 287.669,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 17.75699501992517
+    }
+  ],
+  "backgrounds": [
+    {
+      "at": 0,
+      "fade": 0,
+      "top": "#01040f",
+      "bottom": "#05060f",
+      "accent": "#2f6dff",
+      "nebula": 0.55,
+      "stars": 0.75,
+      "drift": 1
+    },
+    {
+      "at": 60,
+      "fade": 3,
+      "top": "#0a0320",
+      "bottom": "#12062e",
+      "accent": "#a24bff",
+      "nebula": 0.85,
+      "stars": 0.65,
+      "drift": 1.3
+    },
+    {
+      "at": 130,
+      "fade": 3,
+      "top": "#041224",
+      "bottom": "#02060e",
+      "accent": "#8fe3ff",
+      "nebula": 0.45,
+      "stars": 0.8,
+      "drift": 0.8
+    },
+    {
+      "at": 195,
+      "fade": 3,
+      "top": "#1a0503",
+      "bottom": "#0a0201",
+      "accent": "#ff6a1e",
+      "nebula": 0.7,
+      "stars": 0.35,
+      "drift": 1.1
+    },
+    {
+      "at": 255,
+      "fade": 3,
+      "top": "#001a26",
+      "bottom": "#001014",
+      "accent": "#00ffb3",
+      "nebula": 0.75,
+      "stars": 0.5,
+      "drift": 0.9
+    },
+    {
+      "at": 318,
+      "fade": 3,
+      "top": "#1a0226",
+      "bottom": "#26043a",
+      "accent": "#ff3ea5",
+      "nebula": 0.8,
+      "stars": 0.5,
+      "drift": 1.2
+    }
+  ],
+  "fx": {
+    "enabled": true,
+    "chromatic": 0.0014,
+    "vignette": 0.5,
+    "saturation": 1.1,
+    "flash": 0.18,
+    "punch": 0.3,
+    "hit_duration": 0.35
+  }
+}

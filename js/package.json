@@ -1,0 +1,16 @@
+{
+  "name": "chamina-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Three.js headless frame renderer for chamina scene_data.json",
+  "scripts": {
+    "render": "node render.js",
+    "test": "node --test lrc.test.mjs anim.test.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "puppeteer-core": "^25.12.0",
+    "three": "^0.186.1"
+  }
+}

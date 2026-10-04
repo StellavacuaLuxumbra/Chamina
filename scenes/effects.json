@@ -1,0 +1,959 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "duration": 68,
+  "background": "#05060f",
+  "hdr": true,
+  "fxaa": false,
+  "work_dir": "target/chamina",
+  "font_fallback": [
+    "C:\\Windows\\Fonts\\msyh.ttc",
+    "C:\\Windows\\Fonts\\msyh.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf"
+  ],
+  "bloom": {
+    "enabled": true,
+    "intensity": 0.06,
+    "threshold": 1,
+    "scale": 1.2,
+    "high_quality": true
+  },
+  "dof": {
+    "enabled": true,
+    "focal_distance": 14,
+    "focal_radius": 1,
+    "sensor_height": 0.035,
+    "aperture_f_stops": 5.6
+  },
+  "camera": {
+    "fov": 0.8726646,
+    "near": 0.01,
+    "far": 500,
+    "hdr": true
+  },
+  "camera_animation": {
+    "type": "orbit",
+    "radius": 14,
+    "elevation": 0.09,
+    "speed": 0.008823529411764706,
+    "start_yaw": 1.2707963267948965,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "movement": {
+      "ease": "ease_in_out_cubic",
+      "radius_end": 10.5,
+      "elevation_end": 0.03,
+      "at": 8.16,
+      "duration": 51.68
+    },
+    "shake": {
+      "amplitude": 0.045,
+      "frequency": 3.5,
+      "roll": 0.008,
+      "at": 0,
+      "until": null,
+      "ramp": 0.8
+    }
+  },
+  "lights": {
+    "key_color": "#fff5e6",
+    "key_illuminance": 3000,
+    "key_dir": [
+      0.6,
+      0.8,
+      0.5
+    ],
+    "rim_color": "#5a80ff",
+    "rim_illuminance": 1200,
+    "rim_dir": [
+      -0.4,
+      0.1,
+      -1
+    ],
+    "fill_color": "#d9e6ff",
+    "fill_illuminance": 600,
+    "fill_dir": [
+      -0.7,
+      0.2,
+      0.6
+    ],
+    "ambient_color": "#0a0a1a",
+    "ambient_brightness": 40
+  },
+  "seed": 12648430,
+  "texts": [
+    {
+      "text": "动效演示",
+      "size": 3,
+      "depth": 0.12,
+      "position": [
+        0,
+        1.2,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.7,
+          "stagger": 0.05,
+          "start_at": 1.2,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.05,
+          "start_at": 1.2,
+          "fade_out_at": 5.3,
+          "fade_out": 0.9
+        }
+      ],
+      "fit_width": 10.6541970119551
+    },
+    {
+      "text": "jitter · pop · wave · dolly · shake",
+      "size": 1,
+      "depth": 0.12,
+      "position": [
+        0,
+        -0.6,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.1199999999999999
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.7,
+          "stagger": 0.03,
+          "start_at": 1.2,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.03,
+          "start_at": 1.2,
+          "fade_out_at": 5.3,
+          "fade_out": 0.9
+        }
+      ],
+      "fit_width": 7.39874792496882
+    },
+    {
+      "text": "今天是属于你的日子",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 6.5,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 6.5,
+          "fade_out_at": 9.75,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 0,
+          "start_at": 6.9,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 6.5,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "烛光摇曳 暖得像你笑起来的样子",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 10.2,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 10.2,
+          "fade_out_at": 14.55,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 1.7,
+          "start_at": 10.6,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 10.2,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "愿你所愿皆成真",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 15,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 15,
+          "fade_out_at": 19.05,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 3.4,
+          "start_at": 15.4,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 15,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "走过的路都算数",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 19.5,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 19.5,
+          "fade_out_at": 23.35,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 5.1,
+          "start_at": 19.9,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 19.5,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "流过的泪都变成礼物",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 23.8,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 23.8,
+          "fade_out_at": 28.15,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 6.8,
+          "start_at": 24.2,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 23.8,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "别急 你只要慢慢来就好",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 28.6,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 28.6,
+          "fade_out_at": 32.95,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 8.5,
+          "start_at": 29,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 28.6,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "风会替你把门推开",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 33.4,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 33.4,
+          "fade_out_at": 38.55,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 10.2,
+          "start_at": 33.8,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 33.4,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "愿你所愿皆成真",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 39,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 39,
+          "fade_out_at": 43.05,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 11.9,
+          "start_at": 39.4,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 39,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "新的一岁 请继续明亮",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 43.5,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 43.5,
+          "fade_out_at": 47.55,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 13.6,
+          "start_at": 43.9,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 43.5,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "像第一次抬头看星星那样",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 48,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 48,
+          "fade_out_at": 52.35,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 15.3,
+          "start_at": 48.4,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 48,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "去爱 去犯错 去拥抱未知",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 52.8,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 52.8,
+          "fade_out_at": 57.15,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 17,
+          "start_at": 53.2,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 52.8,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "我们都在你身后",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 57.6,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 57.6,
+          "fade_out_at": 61.95,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 18.7,
+          "start_at": 58,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 57.6,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "生日快乐",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 62.4,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 62.4,
+          "fade_out_at": 64.55,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 20.4,
+          "start_at": 62.8,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 62.4,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    },
+    {
+      "text": "不止今天",
+      "size": 1.4,
+      "depth": 0.09,
+      "position": [
+        0,
+        -0.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffffff",
+        "strength": 1.6
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "pop",
+          "duration": 0.5,
+          "stagger": 0.06,
+          "start_at": 65,
+          "from": 0,
+          "ease": "back_out"
+        },
+        {
+          "type": "fade",
+          "duration": 0.3,
+          "stagger": 0.04,
+          "start_at": 65,
+          "fade_out_at": 67.55,
+          "fade_out": 0.45
+        },
+        {
+          "type": "jitter",
+          "amplitude": [
+            0.035,
+            0.028,
+            0
+          ],
+          "frequency": 5,
+          "rotation": 0.018,
+          "phase": 22.1,
+          "start_at": 65.4,
+          "stagger": 0,
+          "ramp": 0.5
+        },
+        {
+          "type": "wave",
+          "amplitude": 0.16,
+          "frequency": 1.6,
+          "spacing": 0.55,
+          "start_at": 65,
+          "ramp": 0.4
+        }
+      ],
+      "fit_width": 14.79749584993764
+    }
+  ]
+}

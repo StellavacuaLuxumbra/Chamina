@@ -1,0 +1,176 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "duration": 7,
+  "background": "#05060f",
+  "hdr": true,
+  "fxaa": false,
+  "work_dir": "target/chamina",
+  "font_fallback": [
+    "C:\\Windows\\Fonts\\msyh.ttc",
+    "C:\\Windows\\Fonts\\msyh.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf"
+  ],
+  "bloom": {
+    "enabled": true,
+    "intensity": 0.3,
+    "threshold": 1.0,
+    "scale": 1.2,
+    "high_quality": true
+  },
+  "dof": {
+    "enabled": true,
+    "focal_distance": 14,
+    "focal_radius": 1,
+    "sensor_height": 0.035,
+    "aperture_f_stops": 5.6
+  },
+  "camera": {
+    "fov": 0.8726646,
+    "near": 0.01,
+    "far": 500,
+    "hdr": true
+  },
+  "camera_animation": {
+    "type": "orbit",
+    "radius": 14,
+    "elevation": 0.09,
+    "speed": 0.1,
+    "start_yaw": 1.18,
+    "target": [
+      0,
+      1,
+      0
+    ]
+  },
+  "lights": {
+    "key_color": "#fff5e6",
+    "key_illuminance": 3000,
+    "key_dir": [
+      0.6,
+      0.8,
+      0.5
+    ],
+    "rim_color": "#5a80ff",
+    "rim_illuminance": 1200,
+    "rim_dir": [
+      -0.4,
+      0.1,
+      -1
+    ],
+    "fill_color": "#d9e6ff",
+    "fill_illuminance": 600,
+    "fill_dir": [
+      -0.7,
+      0.2,
+      0.6
+    ],
+    "ambient_color": "#0a0a1a",
+    "ambient_brightness": 40
+  },
+  "seed": 12648430,
+  "texts": [
+    {
+      "text": "生日快乐",
+      "size": 3.9,
+      "depth": 0.16,
+      "position": [
+        0,
+        3.4,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#00e5ff",
+        "strength": 1.7,
+        "outline": {
+          "color": "#eafcff",
+          "width": 0.02,
+          "strength": 1
+        }
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "fall",
+          "duration": 1,
+          "stagger": 0.12,
+          "height": 1.2,
+          "gravity": -2,
+          "drift": 0,
+          "wobble": 0
+        },
+        {
+          "type": "fade",
+          "duration": 0.9,
+          "stagger": 0.12,
+          "fade_out_at": 6.2,
+          "fade_out": 0.8
+        }
+      ]
+    },
+    {
+      "text": "Happy Birthday",
+      "size": 1.7,
+      "depth": 0.1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ffd166",
+        "strength": 1.5
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "slide",
+          "delta": [
+            -6,
+            -2.5,
+            0
+          ],
+          "duration": 1.4,
+          "stagger": 0.05,
+          "ease": "ease_out_quad"
+        },
+        {
+          "type": "fade",
+          "duration": 0.6,
+          "stagger": 0.05,
+          "fade_out_at": 6.2,
+          "fade_out": 0.8
+        }
+      ]
+    },
+    {
+      "text": "愿你所愿皆成真",
+      "size": 1.3,
+      "depth": 0.09,
+      "position": [
+        0,
+        -2.3,
+        0
+      ],
+      "material": {
+        "type": "neon",
+        "color": "#ff5fa2",
+        "strength": 1.5
+      },
+      "alpha": 1,
+      "animations": [
+        {
+          "type": "fade",
+          "duration": 1,
+          "stagger": 0.09,
+          "fade_out_at": 6.2,
+          "fade_out": 0.8
+        }
+      ]
+    }
+  ]
+}
