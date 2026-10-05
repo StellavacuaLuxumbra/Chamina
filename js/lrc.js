@@ -7,6 +7,30 @@
 
 const TIME_RE = /^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/;
 const META_RE = /^\[([A-Za-z_][\w#-]*):(.*)\]\s*$/;
+// Per-line overrides ride in braces at the head of the lyric text:
+//   [00:16.575]{e:fall}远离那些繁华悲伤 …
+// Braces are never valid LRC lyric content, so the two syntaxes cannot clash.
+const TAG_RE = /^\{([A-Za-z_][\w-]*)\s*[:=]\s*([^{}]*)\}/;
+const ENTRANCES = ['none', 'slide', 'fall', 'pop'];
+
+/**
+ * Strip leading `{key:value}` overrides off a lyric line.
+ *
+ * @returns {{tags: Object<string,string>, text: string}} `tags` is empty for
+ * an ordinary line, which is why callers only attach it when it has content —
+ * that keeps tag-less scenes byte-identical.
+ */
+function splitTags(text) {
+  const tags = {};
+  let rest = String(text);
+  let m = TAG_RE.exec(rest);
+  while (m) {
+    tags[m[1].toLowerCase()] = m[2].trim();
+    rest = rest.slice(m[0].length);
+    m = TAG_RE.exec(rest);
+  }
+  return { tags, text: rest.trim() };
+}
 
 function toSeconds(m) {
   const min = Number(m[1]);
@@ -20,9 +44,10 @@ function toSeconds(m) {
  * Parse LRC text.
  *
  * @returns {{meta: Object<string,string>, offsetMs: number,
- *            lines: Array<{time: number, text: string}>}}
+ *            lines: Array<{time: number, text: string, tags?: Object<string,string>}>}}
  * `lines` is sorted by time; a line carrying several `[mm:ss.xx]` prefixes
- * becomes several entries (the standard repeat-line idiom).
+ * becomes several entries (the standard repeat-line idiom). Per-line overrides
+ * such as `{e:fall}` land in `tags`, and only when a line actually carries one.
  */
 export function parseLrc(src) {
   const meta = {};
@@ -43,8 +68,12 @@ export function parseLrc(src) {
       m = TIME_RE.exec(rest);
     }
     if (times.length) {
-      const text = rest.replace(/^[\s:]+/, '').trim();
-      for (const t of times) lines.push({ time: t, text });
+      const { tags, text } = splitTags(rest.replace(/^[\s:]+/, '').trim());
+      for (const t of times) {
+        const entry = { time: t, text };
+        if (Object.keys(tags).length) entry.tags = tags;
+        lines.push(entry);
+      }
       continue;
     }
 
@@ -70,7 +99,11 @@ export function parseLrc(src) {
  */
 export function applyOffset(parsed, offsetMs = parsed.offsetMs) {
   const shift = (Number(offsetMs) || 0) / 1000;
-  return parsed.lines.map((l) => ({ time: l.time - shift, text: l.text }));
+  return parsed.lines.map((l) => {
+    const out = { time: l.time - shift, text: l.text };
+    if (l.tags) out.tags = l.tags;
+    return out;
+  });
 }
 
 /** Length of the video that comfortably contains every line. */
@@ -94,7 +127,7 @@ const clampNum = (v, fallback, lo, hi) => {
  * both layers share the same `start_at`, so the line slides/drops in while it
  * fades up.
  *
- * @param {Array<{time:number,text:string}>} lines
+ * @param {Array<{time:number,text:string,tags?:Object<string,string>}>} lines
  * @param {object} opts see the destructuring below
  */
 export function buildLyricTexts(lines, opts = {}) {
@@ -108,7 +141,9 @@ export function buildLyricTexts(lines, opts = {}) {
   const fadeOut = clampNum(opts.fadeOut, 0.45, 0, 10);
   const stagger = clampNum(opts.stagger, 0.04, 0, 1);
   const total = Number.isFinite(Number(opts.total)) ? Number(opts.total) : null;
-  const entrance = opts.entrance || 'none';
+  // Scene-wide default; a line may override it with a leading `{e:fall}` tag.
+  const baseEntrance = opts.entrance || 'none';
+  checkEntrance(baseEntrance);
   // World-space width budget. Rust resolves it against real font metrics at
   // export time, so we only have to say how much of the frame a line may use.
   const fitWidth = Number(opts.fitWidth);
@@ -119,6 +154,7 @@ export function buildLyricTexts(lines, opts = {}) {
     const line = lines[i];
     if (!line.text) continue;
 
+    const entrance = lineEntrance(line, baseEntrance);
     const t = round3(line.time + offset);
     const nextRaw = lines[i + 1] ? lines[i + 1].time + offset : total;
     const next = Number.isFinite(nextRaw) ? nextRaw : t + 3;
@@ -188,6 +224,24 @@ export function buildLyricTexts(lines, opts = {}) {
 
 function round3(v) {
   return Math.round(v * 1000) / 1000;
+}
+
+function checkEntrance(mode) {
+  if (!ENTRANCES.includes(mode)) {
+    throw new Error(`unknown entrance "${mode}" (have: ${ENTRANCES.join(', ')})`);
+  }
+  return mode;
+}
+
+/**
+ * The entrance for one line: its `{e:fall}` tag if present, otherwise the
+ * scene-wide `--entrance`. A typo'd mode throws rather than silently rendering
+ * the wrong motion, because a whole line of the PV would be off.
+ */
+function lineEntrance(line, fallback) {
+  const raw = line.tags && line.tags.e;
+  if (raw === undefined || raw === '') return fallback;
+  return checkEntrance(String(raw).trim().toLowerCase());
 }
 
 const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
@@ -261,7 +315,7 @@ export function buildTitleBlock(opts = {}) {
   const fadeOut = clampNum(opts.fadeOut, 0.9, 0, 10);
   const stagger = clampNum(opts.stagger, 0.03, 0, 1);
   const outAt = Number(opts.outAt);
-  const entrance = opts.entrance || 'none';
+  const entrance = checkEntrance(opts.entrance || 'none');
 
   const animations = [];
   if (entrance === 'slide') {

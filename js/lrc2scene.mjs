@@ -48,6 +48,8 @@ const USAGE = `chamina lrc → scene
                          the gift-card preset uses 0.3, which floods the
                          gaps between strokes of a whole lyric line
       --entrance <mode>  none | slide | fall | pop (default slide)
+                   a line may override it with a leading tag, e.g.
+                   [00:16.575]{e:fall}远离那些繁华悲伤 …
       --jitter <amp>     idle wobble on every line, world units (default off)
       --jitter-rot <rad> rotational part of the wobble (default 0)
       --jitter-freq <hz> wobble rate (default 5)
@@ -84,6 +86,10 @@ const USAGE = `chamina lrc → scene
       --bg-look <name>   replace the flat colour with an animated sky that
                          drifts, glows and twinkles: ${Object.keys(LOOKS).join(' | ')}
       --bg-cut <t>:<n>   cut to look <n> at second <t>; repeat for more cuts
+                   <n> may instead be an inline palette, so one song can cut
+                   dozens of times without adding a named look:
+                     <t>:#top/#bottom/#accent[@nebula,stars,drift]
+                     --bg-cut 24.152:#00303a/#01121a/#6cffd0@0.75,0.7,1.1
       --bg-fade <sec>    crossfade length for every cut (default 1.5, 0 = hard)
       --fx               grade/distortion rack: vignette + chromatic + cue flash
                          split + saturation, plus a white flash and a small
@@ -239,22 +245,23 @@ function clamp(v, lo, hi, fallback) {
  * Turn `--bg-look` / `--bg-cut` into the background timeline the renderer
  * crossfades through. Returns null when neither flag was given, so regenerating
  * an existing scene stays byte-identical.
+ *
+ * A cut's payload is either a LOOKS name or an inline palette, so one song can
+ * cut thirty times without thirty entries in LOOKS:
+ *
+ *   --bg-cut 24.152:aurora
+ *   --bg-cut 24.152:#00303a/#01121a/#6cffd0@0.75,0.7,1.1
+ *                                 top     bottom    accent   nebula,stars,drift
  */
 function buildBackgrounds(args) {
   const cuts = [];
   if (args.bgLook) cuts.push({ at: 0, name: args.bgLook });
-  for (const raw of args.bgCut) {
-    const s = String(raw);
-    const i = s.lastIndexOf(':');
-    if (i < 0) throw new Error(`--bg-cut wants <seconds>:<look>, got ${raw}`);
-    const at = Number(s.slice(0, i));
-    if (!Number.isFinite(at)) throw new Error(`--bg-cut: bad time in ${raw}`);
-    cuts.push({ at, name: s.slice(i + 1) });
-  }
+  for (const raw of args.bgCut) cuts.push(parseCut(raw));
   if (cuts.length === 0) return null;
   // A first cut with no opener still needs something to cut *from*.
   if (cuts[0].at > 0) cuts.unshift({ at: 0, name: 'night' });
   for (const c of cuts) {
+    if (c.palette) continue;
     if (!LOOKS[c.name]) {
       throw new Error(`unknown look "${c.name}" (have: ${Object.keys(LOOKS).join(', ')})`);
     }
@@ -264,8 +271,45 @@ function buildBackgrounds(args) {
   return cuts.map((c, i) => ({
     at: i === 0 ? 0 : c.at,
     fade: i === 0 ? 0 : fade,
-    ...LOOKS[c.name],
+    ...(c.palette || LOOKS[c.name]),
   }));
+}
+
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+const RATIO = (v, lo, hi, fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+};
+
+/** `<seconds>:<look>` or `<seconds>:#top/#bottom/#accent[@n,s,d]` → one cut. */
+function parseCut(raw) {
+  // A trailing ` # …` note is allowed; hexes never have whitespace before `#`.
+  const s = String(raw);
+  const note = s.search(/\s#/);
+  const line = note < 0 ? s : s.slice(0, note);
+  const i = line.lastIndexOf(':');
+  if (i < 0) throw new Error(`--bg-cut wants <seconds>:<look>, got ${raw}`);
+  const at = Number(line.slice(0, i));
+  if (!Number.isFinite(at)) throw new Error(`--bg-cut: bad time in ${raw}`);
+  const spec = line.slice(i + 1);
+  if (!spec.includes('/')) return { at, name: spec };
+
+  const parts = spec.split('/');
+  if (parts.length !== 3) throw new Error(`--bg-cut palette wants top/bottom/accent, got ${raw}`);
+  // The accent carries the sliders: `#4a6cff@0.55,0.85,1.0`.
+  const [accent, sliders] = parts[2].split('@');
+  const hexes = [parts[0], parts[1], accent];
+  for (const hex of hexes) {
+    if (!HEX6.test(hex)) throw new Error(`--bg-cut: "${hex}" is not #rrggbb in ${raw}`);
+  }
+  const palette = { top: parts[0], bottom: parts[1], accent, nebula: 0.6, stars: 0.6, drift: 1 };
+  if (sliders) {
+    const [n, st, d] = sliders.split(',');
+    palette.nebula = RATIO(n, 0, 1, palette.nebula);
+    palette.stars = RATIO(st, 0, 1, palette.stars);
+    palette.drift = RATIO(d, 0, 4, palette.drift);
+  }
+  return { at, palette };
 }
 
 /** The grade/distortion rack, or null so the scene renders untouched. */
@@ -349,10 +393,13 @@ function main() {
   const parsed = parseLrc(fs.readFileSync(lrcPath, 'utf8'));
   // The LRC `[offset:]` tag and `--offset` both nudge the whole song; the tag
   // runs first so the CLI flag stays an explicit authoring correction.
-  const lines = applyOffset(parsed).map((l) => ({
-    time: l.time + (args.offset || 0),
-    text: l.text,
-  }));
+  const lines = applyOffset(parsed).map((l) => {
+    const out = { time: l.time + (args.offset || 0), text: l.text };
+    // Per-line `{e:fall}` overrides — without this the tag would be parsed and
+    // then silently thrown away here.
+    if (l.tags) out.tags = l.tags;
+    return out;
+  });
   if (!lines.length) throw new Error(`no timestamped lines in ${lrcPath}`);
 
   const template = JSON.parse(fs.readFileSync(resolve(args.template), 'utf8'));

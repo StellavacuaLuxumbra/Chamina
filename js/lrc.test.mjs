@@ -116,3 +116,59 @@ test('without an out time the title card stays lit', () => {
 test('a non-positive start time is clamped to zero', () => {
   assert.equal(buildTitleBlock({ text: 'x', startAt: -5 }).animations[0].start_at, 0);
 });
+
+const TAGGED = `[offset:500]
+[00:01.000]{e:fall}第一句
+[00:03.000]普通句
+[00:05.000]{E=pop}{other:hi}  有空格的
+`;
+
+test('a leading {e:…} tag becomes a per-line override, not lyric text', () => {
+  const { lines } = parseLrc(TAGGED);
+  assert.equal(lines[0].text, '第一句');
+  assert.deepEqual(lines[0].tags, { e: 'fall' });
+  assert.equal(lines[1].text, '普通句');
+  assert.ok(!('tags' in lines[1]), 'an ordinary line must not grow a tags key');
+});
+
+test('several braces are read left to right and the text is trimmed', () => {
+  const { lines } = parseLrc(TAGGED);
+  assert.deepEqual(lines[2].tags, { e: 'pop', other: 'hi' });
+  assert.equal(lines[2].text, '有空格的');
+});
+
+test('tags survive the LRC offset shift', () => {
+  const lines = applyOffset(parseLrc(TAGGED));
+  assert.equal(lines[0].time, 0.5);
+  assert.deepEqual(lines[0].tags, { e: 'fall' });
+  assert.ok(!('tags' in lines[1]));
+});
+
+test('the entrance tag overrides the scene-wide --entrance', () => {
+  const texts = buildLyricTexts(applyOffset(parseLrc(TAGGED)), { entrance: 'slide' });
+  const kind = (t) => t.animations.map((a) => a.type);
+  assert.ok(kind(texts[0]).includes('fall'), 'tagged line must fall');
+  assert.ok(kind(texts[1]).includes('slide'), 'untagged line keeps the global mode');
+  assert.ok(kind(texts[2]).includes('pop'), 'tag keys are case-insensitive');
+});
+
+test('every line still lights its entrance and its fade on one cue', () => {
+  const texts = buildLyricTexts(applyOffset(parseLrc(TAGGED)), { entrance: 'slide' });
+  for (const t of texts) {
+    assert.equal(new Set(t.animations.map((a) => a.start_at)).size, 1, `mixed cues on "${t.text}"`);
+  }
+});
+
+test('an unknown entrance is an error, not a silent fallback', () => {
+  assert.throws(() => buildLyricTexts([{ time: 1, text: 'X' }], { entrance: 'wiggle' }), /unknown entrance/);
+  assert.throws(
+    () => buildLyricTexts([{ time: 1, text: 'X', tags: { e: 'wiggle' } }], { entrance: 'slide' }),
+    /unknown entrance/,
+  );
+  assert.throws(() => buildTitleBlock({ text: 'X', entrance: 'wiggle' }), /unknown entrance/);
+});
+
+test('a tag never appears in the rendered text', () => {
+  const texts = buildLyricTexts(applyOffset(parseLrc(TAGGED)), {});
+  for (const t of texts) assert.ok(!t.text.includes('{'), `brace leaked into "${t.text}"`);
+});

@@ -285,16 +285,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 16.575
+          "start_at": 16.575,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -351,16 +347,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 24.152
+          "start_at": 24.152,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -549,16 +541,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 53.684
+          "start_at": 53.684,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -615,16 +603,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 61.482
+          "start_at": 61.482,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -747,18 +731,6 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 77.246
-        },
-        {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
@@ -813,16 +785,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 84.347
+          "start_at": 84.347,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -945,16 +913,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 100.077
+          "start_at": 100.077,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -1011,15 +975,13 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
+          "type": "fall",
           "duration": 0.7,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
+          "height": 1.4,
+          "gravity": -3,
+          "drift": 0,
+          "wobble": 0,
           "start_at": 107.945
         },
         {
@@ -1077,18 +1039,6 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 114.718
-        },
-        {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
@@ -1143,16 +1093,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 122.419
+          "start_at": 122.419,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -1208,18 +1154,6 @@
       },
       "alpha": 1,
       "animations": [
-        {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 129.363
-        },
         {
           "type": "fade",
           "duration": 0.3,
@@ -1341,15 +1275,13 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
+          "type": "fall",
           "duration": 0.7,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
+          "height": 1.4,
+          "gravity": -3,
+          "drift": 0,
+          "wobble": 0,
           "start_at": 167.762
         },
         {
@@ -1473,15 +1405,13 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
+          "type": "fall",
           "duration": 0.7,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
+          "height": 1.4,
+          "gravity": -3,
+          "drift": 0,
+          "wobble": 0,
           "start_at": 183.438
         },
         {
@@ -1539,16 +1469,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 191.183
+          "start_at": 191.183,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -1604,18 +1530,6 @@
       },
       "alpha": 1,
       "animations": [
-        {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 198.614
-        },
         {
           "type": "fade",
           "duration": 0.3,
@@ -1737,15 +1651,13 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
+          "type": "fall",
           "duration": 0.7,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
+          "height": 1.4,
+          "gravity": -3,
+          "drift": 0,
+          "wobble": 0,
           "start_at": 214.191
         },
         {
@@ -1803,16 +1715,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 221.975
+          "start_at": 221.975,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -1869,16 +1777,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 228.911
+          "start_at": 228.911,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -2001,18 +1905,6 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 243.412
-        },
-        {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
@@ -2133,18 +2025,6 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
-          "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 264.121
-        },
-        {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
@@ -2199,16 +2079,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 271.857
+          "start_at": 271.857,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -2265,16 +2141,12 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
-          "duration": 0.7,
+          "type": "pop",
+          "duration": 0.5,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
-          "start_at": 278.693
+          "start_at": 278.693,
+          "from": 0,
+          "ease": "back_out"
         },
         {
           "type": "fade",
@@ -2397,15 +2269,13 @@
       "alpha": 1,
       "animations": [
         {
-          "type": "slide",
-          "delta": [
-            -6,
-            -2.5,
-            0
-          ],
+          "type": "fall",
           "duration": 0.7,
           "stagger": 0.06,
-          "ease": "ease_out_quad",
+          "height": 1.4,
+          "gravity": -3,
+          "drift": 0,
+          "wobble": 0,
           "start_at": 287.669
         },
         {
@@ -2454,54 +2324,334 @@
       "drift": 1
     },
     {
-      "at": 60,
-      "fade": 3,
-      "top": "#0a0320",
-      "bottom": "#12062e",
-      "accent": "#a24bff",
-      "nebula": 0.85,
-      "stars": 0.65,
-      "drift": 1.3
+      "at": 16.575,
+      "fade": 2,
+      "top": "#060a1e",
+      "bottom": "#02030a",
+      "accent": "#4a6cff",
+      "nebula": 0.55,
+      "stars": 0.85,
+      "drift": 1
     },
     {
-      "at": 130,
-      "fade": 3,
-      "top": "#041224",
-      "bottom": "#02060e",
-      "accent": "#8fe3ff",
-      "nebula": 0.45,
-      "stars": 0.8,
-      "drift": 0.8
-    },
-    {
-      "at": 195,
-      "fade": 3,
-      "top": "#1a0503",
-      "bottom": "#0a0201",
-      "accent": "#ff6a1e",
-      "nebula": 0.7,
-      "stars": 0.35,
+      "at": 24.152,
+      "fade": 2,
+      "top": "#00303a",
+      "bottom": "#01121a",
+      "accent": "#6cffd0",
+      "nebula": 0.75,
+      "stars": 0.7,
       "drift": 1.1
     },
     {
-      "at": 255,
-      "fade": 3,
-      "top": "#001a26",
-      "bottom": "#001014",
-      "accent": "#00ffb3",
-      "nebula": 0.75,
-      "stars": 0.5,
+      "at": 31.148,
+      "fade": 2,
+      "top": "#050b1c",
+      "bottom": "#01040e",
+      "accent": "#cfe6ff",
+      "nebula": 0.4,
+      "stars": 0.9,
+      "drift": 0.7
+    },
+    {
+      "at": 39.883,
+      "fade": 2,
+      "top": "#10203f",
+      "bottom": "#3a2440",
+      "accent": "#ffb46a",
+      "nebula": 0.65,
+      "stars": 0.45,
+      "drift": 1.2
+    },
+    {
+      "at": 53.684,
+      "fade": 2,
+      "top": "#2a1030",
+      "bottom": "#0d0512",
+      "accent": "#ff9ecb",
+      "nebula": 0.5,
+      "stars": 0.55,
       "drift": 0.9
     },
     {
-      "at": 318,
-      "fade": 3,
-      "top": "#1a0226",
-      "bottom": "#26043a",
-      "accent": "#ff3ea5",
-      "nebula": 0.8,
+      "at": 61.482,
+      "fade": 2,
+      "top": "#03120c",
+      "bottom": "#010604",
+      "accent": "#9dffb0",
+      "nebula": 0.45,
       "stars": 0.5,
+      "drift": 0.7
+    },
+    {
+      "at": 69.356,
+      "fade": 2,
+      "top": "#2a1400",
+      "bottom": "#100600",
+      "accent": "#ffd24a",
+      "nebula": 0.6,
+      "stars": 0.4,
+      "drift": 1
+    },
+    {
+      "at": 77.246,
+      "fade": 2,
+      "top": "#0a0330",
+      "bottom": "#04011a",
+      "accent": "#b06bff",
+      "nebula": 0.9,
+      "stars": 0.95,
+      "drift": 1.3
+    },
+    {
+      "at": 84.347,
+      "fade": 2,
+      "top": "#2a0a12",
+      "bottom": "#120306",
+      "accent": "#ff6a3c",
+      "nebula": 0.5,
+      "stars": 0.35,
+      "drift": 0.9
+    },
+    {
+      "at": 92.069,
+      "fade": 2,
+      "top": "#02142e",
+      "bottom": "#010a1a",
+      "accent": "#2fb6ff",
+      "nebula": 0.7,
+      "stars": 0.5,
+      "drift": 1.4
+    },
+    {
+      "at": 100.077,
+      "fade": 2,
+      "top": "#0d1630",
+      "bottom": "#05070f",
+      "accent": "#ffffff",
+      "nebula": 0.55,
+      "stars": 0.6,
+      "drift": 1.1
+    },
+    {
+      "at": 107.945,
+      "fade": 2,
+      "top": "#04101f",
+      "bottom": "#01060e",
+      "accent": "#3fa9ff",
+      "nebula": 0.6,
+      "stars": 0.85,
+      "drift": 0.6
+    },
+    {
+      "at": 114.718,
+      "fade": 2,
+      "top": "#0d2410",
+      "bottom": "#04100a",
+      "accent": "#b6ff5a",
+      "nebula": 0.5,
+      "stars": 0.6,
       "drift": 1.2
+    },
+    {
+      "at": 122.419,
+      "fade": 2,
+      "top": "#0a0f1e",
+      "bottom": "#03050c",
+      "accent": "#8fb8ff",
+      "nebula": 0.8,
+      "stars": 0.4,
+      "drift": 1.6
+    },
+    {
+      "at": 129.363,
+      "fade": 2,
+      "top": "#0b1a2e",
+      "bottom": "#030814",
+      "accent": "#7ef0ff",
+      "nebula": 0.6,
+      "stars": 0.5,
+      "drift": 0.8
+    },
+    {
+      "at": 137.977,
+      "fade": 2,
+      "top": "#050226",
+      "bottom": "#01010c",
+      "accent": "#7a8cff",
+      "nebula": 0.85,
+      "stars": 0.9,
+      "drift": 1.8
+    },
+    {
+      "at": 167.762,
+      "fade": 2,
+      "top": "#241202",
+      "bottom": "#0d0601",
+      "accent": "#ffa23c",
+      "nebula": 0.55,
+      "stars": 0.35,
+      "drift": 0.8
+    },
+    {
+      "at": 175.459,
+      "fade": 2,
+      "top": "#1c1a10",
+      "bottom": "#0a0906",
+      "accent": "#fff0c0",
+      "nebula": 0.45,
+      "stars": 0.4,
+      "drift": 0.7
+    },
+    {
+      "at": 183.438,
+      "fade": 2,
+      "top": "#021a34",
+      "bottom": "#01081a",
+      "accent": "#1e8fff",
+      "nebula": 0.8,
+      "stars": 0.45,
+      "drift": 1.5
+    },
+    {
+      "at": 191.183,
+      "fade": 2,
+      "top": "#20061e",
+      "bottom": "#0a020a",
+      "accent": "#ff6ad5",
+      "nebula": 0.95,
+      "stars": 0.8,
+      "drift": 2
+    },
+    {
+      "at": 198.614,
+      "fade": 2,
+      "top": "#03071a",
+      "bottom": "#01030c",
+      "accent": "#cfe0ff",
+      "nebula": 0.5,
+      "stars": 0.95,
+      "drift": 0.6
+    },
+    {
+      "at": 206.281,
+      "fade": 2,
+      "top": "#141820",
+      "bottom": "#080a10",
+      "accent": "#b9c4d4",
+      "nebula": 0.5,
+      "stars": 0.35,
+      "drift": 0.5
+    },
+    {
+      "at": 214.191,
+      "fade": 2,
+      "top": "#2a1c04",
+      "bottom": "#120a01",
+      "accent": "#ffd166",
+      "nebula": 0.6,
+      "stars": 0.45,
+      "drift": 1.1
+    },
+    {
+      "at": 221.975,
+      "fade": 2,
+      "top": "#070422",
+      "bottom": "#020212",
+      "accent": "#9db4ff",
+      "nebula": 0.75,
+      "stars": 0.9,
+      "drift": 0.9
+    },
+    {
+      "at": 228.911,
+      "fade": 2,
+      "top": "#0a1a2c",
+      "bottom": "#04091a",
+      "accent": "#66d9ff",
+      "nebula": 0.7,
+      "stars": 0.7,
+      "drift": 1.4
+    },
+    {
+      "at": 236.475,
+      "fade": 2,
+      "top": "#00333a",
+      "bottom": "#12003a",
+      "accent": "#7dff9e",
+      "nebula": 0.9,
+      "stars": 0.6,
+      "drift": 1.3
+    },
+    {
+      "at": 243.412,
+      "fade": 2,
+      "top": "#0a1020",
+      "bottom": "#04060e",
+      "accent": "#e8f0ff",
+      "nebula": 0.5,
+      "stars": 0.85,
+      "drift": 0.7
+    },
+    {
+      "at": 252.185,
+      "fade": 2,
+      "top": "#010418",
+      "bottom": "#00010a",
+      "accent": "#2e6bff",
+      "nebula": 0.8,
+      "stars": 0.95,
+      "drift": 1
+    },
+    {
+      "at": 264.121,
+      "fade": 2,
+      "top": "#000000",
+      "bottom": "#000000",
+      "accent": "#3a3a5a",
+      "nebula": 0.15,
+      "stars": 0.1,
+      "drift": 0.4
+    },
+    {
+      "at": 271.857,
+      "fade": 2,
+      "top": "#120820",
+      "bottom": "#06030c",
+      "accent": "#ffd89b",
+      "nebula": 0.7,
+      "stars": 0.6,
+      "drift": 1
+    },
+    {
+      "at": 278.693,
+      "fade": 2,
+      "top": "#241000",
+      "bottom": "#0d0500",
+      "accent": "#ff9c3f",
+      "nebula": 0.55,
+      "stars": 0.4,
+      "drift": 0.6
+    },
+    {
+      "at": 281.024,
+      "fade": 2,
+      "top": "#22063a",
+      "bottom": "#0d021a",
+      "accent": "#ff7ae0",
+      "nebula": 0.85,
+      "stars": 0.75,
+      "drift": 1.2
+    },
+    {
+      "at": 287.669,
+      "fade": 2,
+      "top": "#1a1a2e",
+      "bottom": "#0e0e1a",
+      "accent": "#ffffff",
+      "nebula": 0.6,
+      "stars": 0.5,
+      "drift": 1
     }
   ],
   "fx": {
