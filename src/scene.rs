@@ -237,6 +237,26 @@ pub struct CameraShake {
     pub until: Option<f32>,
     /// Seconds spent fading in (and, when `until` is set, out).
     pub ramp: f32,
+    /// Gate the shake on the lyric cues instead of running it for the whole
+    /// scene: the rig is dead still until a line lands, then kicks for
+    /// `hit_duration` seconds. Without this the hand-held wobble never stops
+    /// and the picture reads as a permanent tremor rather than an impact.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hit: bool,
+    /// How long one cue's kick lasts (seconds).
+    #[serde(
+        default = "default_shake_hit_duration",
+        skip_serializing_if = "is_default_shake_hit_duration"
+    )]
+    pub hit_duration: f32,
+}
+
+fn default_shake_hit_duration() -> f32 {
+    0.55
+}
+
+fn is_default_shake_hit_duration(v: &f32) -> bool {
+    (*v - default_shake_hit_duration()).abs() < 1e-6
 }
 
 impl Default for CameraShake {
@@ -248,6 +268,8 @@ impl Default for CameraShake {
             at: 0.0,
             until: None,
             ramp: 0.6,
+            hit: false,
+            hit_duration: default_shake_hit_duration(),
         }
     }
 }
@@ -273,6 +295,18 @@ impl CameraShake {
     pub fn between(mut self, at: f32, until: f32) -> Self {
         self.at = at;
         self.until = Some(until);
+        self
+    }
+
+    /// Gate the shake on lyric cues rather than the whole scene clock.
+    pub fn hit(mut self, hit: bool) -> Self {
+        self.hit = hit;
+        self
+    }
+
+    /// Length of one cue kick in seconds.
+    pub fn hit_duration(mut self, d: f32) -> Self {
+        self.hit_duration = d;
         self
     }
 
@@ -577,9 +611,17 @@ pub struct TextSpec {
     pub alpha: f32,
     /// Optional world-space width budget. When the laid-out line is wider,
     /// `size` is scaled down so it fits. Font metrics only exist at export
-    /// time, so this is the one place auto-fitting can happen — lyric lines
+    /// time, so this is the one place auto-fitting can happen �?lyric lines
     /// run from three characters to twenty and would otherwise crop.
     pub fit_width: Option<f32>,
+    /// Word timing: one absolute appearance time per glyph, in seconds, in
+    /// `text` character order (spaces included). A word-timed LRC's
+    /// `<mm:ss.xx>` stamps land here, and every staggered animation then reads
+    /// its delay from this list instead of `start_at + idx * stagger`, so each
+    /// glyph arrives on its own musical beat. `None` — and any list shorter
+    /// than `text` — keeps the uniform grid, so plain scenes are untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub char_times: Option<Vec<f32>>,
 }
 
 impl Default for TextSpec {
@@ -597,6 +639,7 @@ impl Default for TextSpec {
             animations: Vec::new(),
             alpha: 1.0,
             fit_width: None,
+            char_times: None,
         }
     }
 }
@@ -653,6 +696,15 @@ impl TextSpec {
     /// match. `w <= 0` disables the budget.
     pub fn fit_width(&mut self, w: f32) -> &mut Self {
         self.fit_width = if w > 0.0 { Some(w) } else { None };
+        self
+    }
+
+    /// Word timing for the line: one absolute appearance time per glyph, in
+    /// `text` character order. `times` shorter than `text` (or empty) simply
+    /// leaves the tail of the line on the uniform stagger grid.
+    pub fn char_times(&mut self, times: impl Into<Vec<f32>>) -> &mut Self {
+        let times = times.into();
+        self.char_times = if times.is_empty() { None } else { Some(times) };
         self
     }
 
@@ -875,6 +927,32 @@ mod tests {
                 assert_eq!(s.until, Some(4.0));
             }
         }
+    }
+
+    #[test]
+    fn shake_gate_defaults_off_and_round_trips() {
+        // A scene written before the gate existed must keep running its shake
+        // for the whole scene exactly as it did.
+        let legacy = r#"{"amplitude":0.03,"frequency":3.0,"roll":0.006,
+                         "at":0.0,"ramp":0.8}"#;
+        let s: CameraShake = serde_json::from_str(legacy).unwrap();
+        assert!(!s.hit, "missing `hit` must not silently start gating");
+        assert!((s.hit_duration - 0.55).abs() < 1e-6, "kick length defaults");
+
+        let on = CameraShake::new(0.05).hit(true).hit_duration(0.8);
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(
+            json.contains("\"hit\":true"),
+            "enabled gate is written: {json}"
+        );
+        let back: CameraShake = serde_json::from_str(&json).unwrap();
+        assert!(back.hit);
+        assert!((back.hit_duration - 0.8).abs() < 1e-6);
+
+        // The off case stays out of the JSON so existing scenes round-trip
+        // byte for byte.
+        let off = serde_json::to_string(&CameraShake::new(0.05)).unwrap();
+        assert!(!off.contains("hit"), "off gate must be omitted: {off}");
     }
 
     #[test]

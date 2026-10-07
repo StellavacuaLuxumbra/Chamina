@@ -44,6 +44,21 @@ pub fn jitter_noise(t: f32, w: f32, p: f32) -> Vec3 {
     Vec3::new(o[0], o[1], o[2])
 }
 
+/// Weight of a cue-gated motion at `t`: 1 the instant its line lands, then a
+/// quadratic decay to 0 over `duration`, 0 outside that window. Every gated
+/// effect (text wobble, karaoke wave, hand-held shake) uses this one shape so a
+/// shudder and a camera kick read as the same hit.
+///
+/// Mirror: `hitWeight` / `hitEnvelope` in `js/anim.mjs`.
+pub fn hit_weight(t: f32, at: f32, duration: f32) -> f32 {
+    let u = (t - at) / duration.max(1e-6);
+    if !(0.0..=1.0).contains(&u) {
+        0.0
+    } else {
+        (1.0 - u) * (1.0 - u)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Easing
 // ---------------------------------------------------------------------------
@@ -360,8 +375,9 @@ impl Slide {
 // ---------------------------------------------------------------------------
 
 /// Continuous, deterministic hand-held wobble. Unlike [`Fall`] / [`Slide`] it
-/// never settles: it is meant for text that is already on screen and should
-/// not read as a frozen still.
+/// never settles on its own: it is meant for text that is already on screen and
+/// should not read as a frozen still. Set [`Jitter::hit`] to put it behind the
+/// cue gate instead — one shudder when the line lands, then dead still.
 ///
 /// `amplitude` is in world units at `size == 1` and is scaled by the text's
 /// size, so the same numbers look right at any font size.
@@ -381,8 +397,27 @@ pub struct Jitter {
     /// Per-character delay of the wobble start; `0` shakes the line as a unit.
     pub stagger: f32,
     /// Seconds spent ramping the amplitude in from zero, so a line parked at
-    /// its cue does not snap sideways on the frame it appears.
+    /// its cue does not snap sideways on the frame it appears. Ignored while
+    /// [`Jitter::hit`] is set — the gate is its own envelope.
     pub ramp: f32,
+    /// Gate the wobble on the line's cue instead of letting it run for the
+    /// whole hold: the line shudders as it lands, then freezes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hit: bool,
+    /// Seconds one shudder rings for.
+    #[serde(
+        default = "default_jitter_hit_duration",
+        skip_serializing_if = "is_default_jitter_hit_duration"
+    )]
+    pub hit_duration: f32,
+}
+
+fn default_jitter_hit_duration() -> f32 {
+    0.55
+}
+
+fn is_default_jitter_hit_duration(v: &f32) -> bool {
+    (*v - default_jitter_hit_duration()).abs() < 1e-6
 }
 
 impl Default for Jitter {
@@ -395,6 +430,8 @@ impl Default for Jitter {
             start_at: 0.0,
             stagger: 0.0,
             ramp: 0.3,
+            hit: false,
+            hit_duration: default_jitter_hit_duration(),
         }
     }
 }
@@ -426,6 +463,18 @@ impl Jitter {
 
     pub fn stagger(mut self, s: f32) -> Self {
         self.stagger = s;
+        self
+    }
+
+    /// One shudder on the cue instead of a continuous wobble.
+    pub fn hit(mut self, hit: bool) -> Self {
+        self.hit = hit;
+        self
+    }
+
+    /// Length of that shudder in seconds.
+    pub fn hit_duration(mut self, d: f32) -> Self {
+        self.hit_duration = d;
         self
     }
 }
@@ -515,8 +564,28 @@ pub struct Wave {
     pub spacing: f32,
     /// Absolute time (s) the wave starts.
     pub start_at: f32,
-    /// Seconds spent ramping the amplitude in from zero.
+    /// Seconds spent ramping the amplitude in from zero. Ignored while
+    /// [`Wave::hit`] is set — the gate is its own envelope.
     pub ramp: f32,
+    /// Gate the bounce on the line's cue: one ripple runs across the line as
+    /// it lands, fading as it travels, and the line then freezes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hit: bool,
+    /// Seconds one ripple keeps going. Long enough for the crest to cross a
+    /// full line (`(len-1) * spacing / (2π * frequency)`).
+    #[serde(
+        default = "default_wave_hit_duration",
+        skip_serializing_if = "is_default_wave_hit_duration"
+    )]
+    pub hit_duration: f32,
+}
+
+fn default_wave_hit_duration() -> f32 {
+    2.0
+}
+
+fn is_default_wave_hit_duration(v: &f32) -> bool {
+    (*v - default_wave_hit_duration()).abs() < 1e-6
 }
 
 impl Default for Wave {
@@ -527,6 +596,8 @@ impl Default for Wave {
             spacing: 0.55,
             start_at: 0.0,
             ramp: 0.4,
+            hit: false,
+            hit_duration: default_wave_hit_duration(),
         }
     }
 }
@@ -553,6 +624,18 @@ impl Wave {
 
     pub fn start_at(mut self, t: f32) -> Self {
         self.start_at = t;
+        self
+    }
+
+    /// One ripple on the cue instead of a bounce that never stops.
+    pub fn hit(mut self, hit: bool) -> Self {
+        self.hit = hit;
+        self
+    }
+
+    /// How long that ripple keeps travelling, in seconds.
+    pub fn hit_duration(mut self, d: f32) -> Self {
+        self.hit_duration = d;
         self
     }
 }
@@ -645,15 +728,43 @@ impl Default for AnimState {
     }
 }
 
+/// Absolute start time of glyph `idx`.
+///
+/// A word-timed line carries one stamp per glyph (its `<mm:ss.xx>` marks), and
+/// when it does that stamp *is* the delay — the uniform
+/// `start_at + idx * stagger` grid is what a plain line falls back to. A short
+/// or missing stamp list simply runs off the end onto the grid, so no scene can
+/// evaluate differently than it did before word timing existed.
+#[inline]
+fn char_delay(char_times: Option<&[f32]>, start_at: f32, stagger: f32, idx: usize) -> f32 {
+    match char_times.and_then(|ts| ts.get(idx)) {
+        Some(&t) => t,
+        None => start_at + idx as f32 * stagger,
+    }
+}
+
 /// Evaluate a single animation for character `idx` at time `t`.
 ///
 /// `size` is the text's world scale; all positional animation amplitudes are
 /// multiplied by it so a `height: 4.0` fall looks the same on any font size.
 pub fn eval_anim(anim: &AnimationSpec, t: f32, idx: usize, size: f32) -> AnimState {
+    eval_anim_timed(anim, t, idx, size, None)
+}
+
+/// [`eval_anim`] with the line's word timing, which overrides the delay of
+/// every staggered layer at once — fade, entrance and wobble all land on the
+/// same per-glyph beat.
+pub fn eval_anim_timed(
+    anim: &AnimationSpec,
+    t: f32,
+    idx: usize,
+    size: f32,
+    char_times: Option<&[f32]>,
+) -> AnimState {
     let mut st = AnimState::identity();
     match *anim {
         AnimationSpec::Fall(f) => {
-            let delay = f.start_at + idx as f32 * f.stagger;
+            let delay = char_delay(char_times, f.start_at, f.stagger, idx);
             let u = ((t - delay) / f.duration.max(1e-6)).clamp(0.0, 1.0);
             st.offset.y += f.offset_at(u) * size;
             if t > delay {
@@ -662,24 +773,28 @@ pub fn eval_anim(anim: &AnimationSpec, t: f32, idx: usize, size: f32) -> AnimSta
             }
         }
         AnimationSpec::Fade(f) => {
-            let delay = f.start_at + idx as f32 * f.stagger;
+            let delay = char_delay(char_times, f.start_at, f.stagger, idx);
             st.alpha = f.factor_at(t, delay);
         }
         AnimationSpec::Spin(s) => {
             st.rotation = s.rotation_at(t);
         }
         AnimationSpec::Slide(s) => {
-            let delay = s.start_at + idx as f32 * s.stagger;
+            let delay = char_delay(char_times, s.start_at, s.stagger, idx);
             let u = ((t - delay) / s.duration.max(1e-6)).clamp(0.0, 1.0);
             let k = (1.0 - s.ease.apply(u)) * size;
             st.offset += s.delta * k;
         }
         AnimationSpec::Jitter(j) => {
-            let delay = j.start_at + idx as f32 * j.stagger;
+            let delay = char_delay(char_times, j.start_at, j.stagger, idx);
             if t >= delay {
                 let p = j.phase + idx as f32 * CHAR_PHASE;
                 let n = jitter_noise(t, TAU * j.frequency.max(0.0), p);
-                let env = smoothstep((t - delay) / j.ramp.max(1e-6));
+                let env = if j.hit {
+                    hit_weight(t, delay, j.hit_duration)
+                } else {
+                    smoothstep((t - delay) / j.ramp.max(1e-6))
+                };
                 st.offset += Vec3::new(
                     n.x * j.amplitude.x,
                     n.y * j.amplitude.y,
@@ -693,13 +808,17 @@ pub fn eval_anim(anim: &AnimationSpec, t: f32, idx: usize, size: f32) -> AnimSta
             }
         }
         AnimationSpec::Pop(p) => {
-            let delay = p.start_at + idx as f32 * p.stagger;
+            let delay = char_delay(char_times, p.start_at, p.stagger, idx);
             let u = ((t - delay) / p.duration.max(1e-6)).clamp(0.0, 1.0);
             st.scale = p.scale_at(u);
         }
         AnimationSpec::Wave(w) => {
             if t >= w.start_at {
-                let env = smoothstep((t - w.start_at) / w.ramp.max(1e-6));
+                let env = if w.hit {
+                    hit_weight(t, w.start_at, w.hit_duration)
+                } else {
+                    smoothstep((t - w.start_at) / w.ramp.max(1e-6))
+                };
                 let phase = TAU * w.frequency * (t - w.start_at) - idx as f32 * w.spacing;
                 st.offset.y += w.amplitude * env * phase.sin() * size;
             }
@@ -712,9 +831,20 @@ pub fn eval_anim(anim: &AnimationSpec, t: f32, idx: usize, size: f32) -> AnimSta
 /// multiply, alphas multiply. This is the exact order the JS renderer must
 /// reproduce.
 pub fn eval_all(anims: &[AnimationSpec], t: f32, idx: usize, size: f32) -> AnimState {
+    eval_all_timed(anims, t, idx, size, None)
+}
+
+/// [`eval_all`] with the line's word timing threaded through to each layer.
+pub fn eval_all_timed(
+    anims: &[AnimationSpec],
+    t: f32,
+    idx: usize,
+    size: f32,
+    char_times: Option<&[f32]>,
+) -> AnimState {
     let mut out = AnimState::identity();
     for a in anims {
-        let st = eval_anim(a, t, idx, size);
+        let st = eval_anim_timed(a, t, idx, size, char_times);
         out.offset += st.offset;
         out.rotation = out.rotation * st.rotation;
         out.alpha *= st.alpha;
@@ -883,6 +1013,8 @@ mod tests {
             start_at: 4.0,
             stagger: 0.0,
             ramp: 0.5,
+            hit: false,
+            hit_duration: 0.55,
         });
         let parked = eval_anim(&j, 3.9, 0, 2.0);
         assert_eq!(parked.offset, Vec3::ZERO, "no wobble before the cue");
@@ -953,6 +1085,8 @@ mod tests {
             spacing: 0.7,
             start_at: 3.0,
             ramp: 0.4,
+            hit: false,
+            hit_duration: 2.0,
         });
         assert_eq!(
             eval_anim(&w, 2.9, 0, 1.0).offset.y,
@@ -980,6 +1114,103 @@ mod tests {
     }
 
     #[test]
+    fn hit_weight_peaks_on_the_cue_then_decays() {
+        assert_eq!(hit_weight(1.0, 2.0, 0.5), 0.0, "before the hit");
+        assert_eq!(hit_weight(2.5, 2.0, 0.5), 0.0, "after the ring-out");
+        assert_eq!(
+            hit_weight(2.0, 2.0, 0.5),
+            1.0,
+            "full weight on the frame it lands"
+        );
+        let half = hit_weight(2.25, 2.0, 0.5);
+        assert!((half - 0.25).abs() < 1e-6, "quadratic decay, got {half}");
+    }
+
+    #[test]
+    fn motion_gates_default_off_so_old_scenes_are_untouched() {
+        let j: Jitter =
+            serde_json::from_str(r#"{"amplitude":[0.035,0.028,0.0],"frequency":3.0}"#).unwrap();
+        assert!(!j.hit, "a missing `hit` must not silently start gating");
+        assert!((j.hit_duration - 0.55).abs() < 1e-6);
+
+        let w: Wave = serde_json::from_str(r#"{"amplitude":0.09}"#).unwrap();
+        assert!(!w.hit, "a missing `hit` must not silently start gating");
+        assert!((w.hit_duration - 2.0).abs() < 1e-6);
+
+        assert!(
+            !serde_json::to_string(&Jitter::default())
+                .unwrap()
+                .contains("hit"),
+            "the off gate stays out of the JSON"
+        );
+        assert!(
+            !serde_json::to_string(&Wave::default())
+                .unwrap()
+                .contains("hit"),
+            "the off gate stays out of the JSON"
+        );
+    }
+
+    #[test]
+    fn gated_motion_shudders_on_the_cue_then_freezes() {
+        let base = Jitter {
+            amplitude: Vec3::new(0.4, 0.3, 0.0),
+            frequency: 5.0,
+            start_at: 4.0,
+            hit_duration: 0.5,
+            ..Default::default()
+        };
+        let gated = AnimationSpec::Jitter(Jitter { hit: true, ..base });
+        let always = AnimationSpec::Jitter(base);
+
+        assert_eq!(
+            eval_anim(&gated, 3.9, 0, 1.0).offset,
+            Vec3::ZERO,
+            "parked before the cue"
+        );
+        assert_ne!(
+            eval_anim(&gated, 4.2, 0, 1.0).offset,
+            Vec3::ZERO,
+            "kicks with the line"
+        );
+        assert_eq!(
+            eval_anim(&gated, 5.0, 0, 1.0).offset,
+            Vec3::ZERO,
+            "frozen once the kick rings out"
+        );
+        assert_ne!(
+            eval_anim(&always, 5.0, 0, 1.0).offset,
+            Vec3::ZERO,
+            "the ungated wobble keeps running, as before"
+        );
+
+        let w = AnimationSpec::Wave(Wave {
+            amplitude: 0.5,
+            frequency: 1.5,
+            spacing: 0.7,
+            start_at: 3.0,
+            hit: true,
+            hit_duration: 2.0,
+            ..Default::default()
+        });
+        assert_eq!(
+            eval_anim(&w, 2.9, 0, 1.0).offset.y,
+            0.0,
+            "flat before the cue"
+        );
+        assert_ne!(
+            eval_anim(&w, 3.5, 0, 1.0).offset.y,
+            0.0,
+            "ripple runs across the line"
+        );
+        assert_eq!(
+            eval_anim(&w, 5.2, 0, 1.0).offset.y,
+            0.0,
+            "line is still again"
+        );
+    }
+
+    #[test]
     fn layered_state_multiplies_scale() {
         let anims = [
             AnimationSpec::Pop(Pop {
@@ -994,5 +1225,74 @@ mod tests {
         let st = eval_all(&anims, 0.5, 0, 1.0);
         assert!((st.scale - 0.5).abs() < 1e-6, "pop drives the scale");
         assert_eq!(eval_all(&anims, 10.0, 0, 1.0).scale, 1.0);
+    }
+
+    #[test]
+    fn word_timing_overrides_the_stagger_grid() {
+        let times = [10.0, 10.5, 11.0];
+        let stamp = Some(times.as_slice());
+
+        let fade = AnimationSpec::Fade(Fade {
+            duration: 0.3,
+            stagger: 0.04,
+            start_at: 10.0,
+            fade_out_at: None,
+            fade_out: 1.0,
+        });
+        assert_eq!(
+            eval_anim_timed(&fade, 10.5, 1, 1.0, stamp).alpha,
+            0.0,
+            "still dark on its own beat"
+        );
+        assert!(
+            eval_anim_timed(&fade, 10.7, 1, 1.0, stamp).alpha > 0.0,
+            "then lights up on the stamp"
+        );
+        assert_eq!(
+            eval_anim(&fade, 10.5, 1, 1.0).alpha,
+            1.0,
+            "no stamps means the uniform grid, unchanged"
+        );
+        assert!(
+            eval_anim_timed(&fade, 10.1, 1, 1.0, Some(&[10.0][..])).alpha > 0.0,
+            "a short list runs onto the grid instead of freezing its tail"
+        );
+
+        let pop = AnimationSpec::Pop(Pop {
+            duration: 0.5,
+            stagger: 0.06,
+            start_at: 10.0,
+            from: 0.0,
+            ease: Ease::BackOut,
+        });
+        assert!(
+            eval_anim_timed(&pop, 10.5, 1, 1.0, stamp).scale.abs() < 1e-9,
+            "the entrance waits with the fade"
+        );
+        assert!(
+            eval_anim_timed(&pop, 10.5, 1, 1.0, None).scale > 0.0,
+            "without stamps it has already fired"
+        );
+
+        let slide = AnimationSpec::Slide(Slide {
+            delta: Vec3::new(-6.0, -2.5, 0.0),
+            duration: 0.7,
+            stagger: 0.06,
+            ease: Ease::EaseOutQuad,
+            start_at: 10.0,
+        });
+        assert!(
+            (eval_anim_timed(&slide, 10.5, 1, 1.0, stamp).offset.x - (-6.0)).abs() < 1e-6,
+            "parked off-frame until its own stamp"
+        );
+        assert!(
+            eval_anim_timed(&slide, 10.5, 1, 1.0, None).offset.x > -6.0,
+            "without stamps it is already moving"
+        );
+
+        let anims = [fade, pop];
+        let st = eval_all_timed(&anims, 10.5, 1, 1.0, stamp);
+        assert_eq!(st.alpha, 0.0, "one rhythm drives every layer of the line");
+        assert!(st.scale.abs() < 1e-9);
     }
 }

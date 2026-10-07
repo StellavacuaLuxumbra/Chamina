@@ -197,9 +197,18 @@ async function probeCues(page, data, spec) {
       const fade = (t.animations || []).find((a) => a.type === 'fade');
       const cue = fade ? (fade.start_at ?? 0) : 0;
       const out = fade && Number.isFinite(fade.fade_out_at) ? fade.fade_out_at : null;
-      // Midpoint of the lit window, but never earlier than the entrance sweep.
-      const lit = out === null ? cue + Math.max(offset, 1.5)
-        : Math.max(cue + Math.max(offset, 1.5), cue + (out - cue) * 0.5);
+      let lit;
+      if (t.char_times && t.char_times.length) {
+        // Word-timed line: sample just after its last glyph lands, so the check
+        // asks "does the whole line eventually show up?" rather than catching
+        // it mid-sweep. Still inside the lit window, of course.
+        lit = Math.max(cue + 0.4, t.char_times[t.char_times.length - 1] + 0.4);
+        if (out !== null) lit = Math.min(lit, Math.max(cue + 0.1, out - 0.05));
+      } else {
+        // Midpoint of the lit window, but never earlier than the entrance sweep.
+        lit = out === null ? cue + Math.max(offset, 1.5)
+          : Math.max(cue + Math.max(offset, 1.5), cue + (out - cue) * 0.5);
+      }
       return { i, text: t.text, cue, t: Math.min(lit, Math.max(0, duration - 0.2)) };
     });
   } else {

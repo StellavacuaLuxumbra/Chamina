@@ -64,6 +64,11 @@ pub struct TextExport {
     pub alpha: f32,
     pub material: Material,
     pub animations: Vec<AnimationSpec>,
+    /// Word timing: one absolute appearance time per glyph, in `text`
+    /// character order. Omitted when the source carries none, so scenes built
+    /// from an ordinary LRC stay byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub char_times: Option<Vec<f32>>,
     /// Total advance width of the line, in em.
     pub total_width_em: f32,
     /// Em-corrected vertical centre of the line (already applied).
@@ -159,6 +164,7 @@ pub fn build(scene: &Scene) -> Result<SceneData> {
             alpha: spec.alpha,
             material: spec.material,
             animations: spec.animations.clone(),
+            char_times: spec.char_times.clone(),
             total_width_em: layout.total_width,
             line_center_y: layout.line_center_y,
             chars,

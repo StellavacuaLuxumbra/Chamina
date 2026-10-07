@@ -17,7 +17,7 @@ import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 // ./anim.mjs so node can test it without a browser; this file only wires the
 // results onto Three.js objects.
 
-import { clamp01, easeApply, evalAll, evalBackgrounds, hitEnvelope, jitterNoise } from './anim.mjs';
+import { easeApply, evalAll, evalBackgrounds, hitEnvelope, jitterNoise, shakeWeight } from './anim.mjs';
 
 // Debug flags (set through `render.js --url "a=1&b=1"`):
 //   debug      all of the below at once (head-on camera, no post, no particles)
@@ -256,6 +256,9 @@ function buildText(spec, index) {
       idx: c.idx,
       size: spec.size,
       animations: spec.animations || [],
+      // Word timing shared by every animation of this line; `null` for an
+      // ordinary LRC, which then reads its delays off the uniform grid.
+      charTimes: spec.char_times || null,
       basePosition: new THREE.Vector3(
         c.base_position[0],
         c.base_position[1],
@@ -594,20 +597,6 @@ function setupCamera(meta, w, h) {
   }
 }
 
-/**
- * Mirror of Rust's `CameraShake::envelope_at`: fades in over `ramp`, holds,
- * fades out over `ramp` before `until` (and never below zero).
- */
-function shakeEnvelope(s, t) {
-  const at = s.at ?? 0;
-  if (t < at) return 0;
-  const until = s.until;
-  const ramp = Math.max(s.ramp ?? 0.6, 1e-6);
-  if (until !== null && until !== undefined && t > until) return 0;
-  const out = until === null || until === undefined ? 1 : clamp01((until - t) / ramp);
-  return Math.min(clamp01((t - at) / ramp), out);
-}
-
 function updateCamera(t) {
   const o = state.orbit;
   const fx = state.fx;
@@ -651,7 +640,9 @@ function updateCamera(t) {
 
   let roll = 0;
   const s = o.shake;
-  const env = s ? shakeEnvelope(s, t) : 0;
+  // `shakeWeight` gates on the cues directly, so a cue-gated rig still kicks
+  // when the FX rack is off.
+  const env = s ? shakeWeight(s, t, state.cues) : 0;
   if (env > 0) {
     const amp = (s.amplitude ?? 0) * env;
     const n = jitterNoise(t, 2 * Math.PI * Math.max(s.frequency ?? 3.5, 0), 0.7);
@@ -744,7 +735,7 @@ function setFrame(t) {
 
   const tmpQ = new THREE.Quaternion();
   for (const c of state.chars) {
-    const st = evalAll(c.animations, t, c.idx, c.size);
+    const st = evalAll(c.animations, t, c.idx, c.size, c.charTimes);
     c.mesh.position.set(
       c.basePosition.x + st.offset[0],
       c.basePosition.y + st.offset[1],

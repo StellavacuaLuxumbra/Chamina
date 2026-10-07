@@ -122,11 +122,21 @@ export const IDENTITY_STATE = () => ({
   scale: 1,
 });
 
-export function evalAnim(a, t, idx, size) {
+/**
+ * Absolute start time of glyph `idx`. A word-timed line carries one stamp per
+ * glyph and that stamp *is* the delay; anything else falls back to the uniform
+ * `start_at + idx * stagger` grid. Mirror of Rust's `char_delay`.
+ */
+export function charDelay(charTimes, start_at, stagger, idx) {
+  const t = charTimes ? charTimes[idx] : undefined;
+  return t === undefined ? (start_at ?? 0) + idx * stagger : t;
+}
+
+export function evalAnim(a, t, idx, size, charTimes) {
   const st = IDENTITY_STATE();
   switch (a.type) {
     case 'fall': {
-      const delay = (a.start_at ?? 0) + idx * a.stagger;
+      const delay = charDelay(charTimes, a.start_at, a.stagger, idx);
       const u = (t - delay) / Math.max(a.duration, 1e-6);
       st.offset[1] += fallOffset(a, u) * size;
       if (t > delay) {
@@ -136,7 +146,7 @@ export function evalAnim(a, t, idx, size) {
       break;
     }
     case 'fade': {
-      st.alpha = fadeFactor(a, t, (a.start_at ?? 0) + idx * a.stagger);
+      st.alpha = fadeFactor(a, t, charDelay(charTimes, a.start_at, a.stagger, idx));
       break;
     }
     case 'spin': {
@@ -147,7 +157,7 @@ export function evalAnim(a, t, idx, size) {
       break;
     }
     case 'slide': {
-      const delay = (a.start_at ?? 0) + idx * a.stagger;
+      const delay = charDelay(charTimes, a.start_at, a.stagger, idx);
       const u = (t - delay) / Math.max(a.duration, 1e-6);
       const k = (1 - easeApply(a.ease, u)) * size;
       st.offset[0] += a.delta[0] * k;
@@ -156,11 +166,13 @@ export function evalAnim(a, t, idx, size) {
       break;
     }
     case 'jitter': {
-      const delay = (a.start_at ?? 0) + idx * a.stagger;
+      const delay = charDelay(charTimes, a.start_at, a.stagger, idx);
       if (t >= delay) {
         const p = (a.phase ?? 0) + idx * CHAR_PHASE;
         const n = jitterNoise(t, 2 * Math.PI * Math.max(a.frequency, 0), p);
-        const env = smoothstep((t - delay) / Math.max(a.ramp ?? 0.3, 1e-6));
+        const env = a.hit
+          ? hitWeight(t, delay, a.hit_duration ?? 0.55)
+          : smoothstep((t - delay) / Math.max(a.ramp ?? 0.3, 1e-6));
         const amp = a.amplitude || [0.05, 0.04, 0];
         const k = size * env;
         st.offset[0] += n[0] * amp[0] * k;
@@ -174,7 +186,7 @@ export function evalAnim(a, t, idx, size) {
       break;
     }
     case 'pop': {
-      const delay = (a.start_at ?? 0) + idx * a.stagger;
+      const delay = charDelay(charTimes, a.start_at, a.stagger, idx);
       const u = clamp01((t - delay) / Math.max(a.duration, 1e-6));
       const from = a.from ?? 0;
       st.scale = from + (1 - from) * easeApply(a.ease ?? 'back_out', u);
@@ -183,7 +195,9 @@ export function evalAnim(a, t, idx, size) {
     case 'wave': {
       const at = a.start_at ?? 0;
       if (t >= at) {
-        const env = smoothstep((t - at) / Math.max(a.ramp ?? 0.4, 1e-6));
+        const env = a.hit
+          ? hitWeight(t, at, a.hit_duration ?? 2.0)
+          : smoothstep((t - at) / Math.max(a.ramp ?? 0.4, 1e-6));
         const phase = 2 * Math.PI * a.frequency * (t - at) - idx * (a.spacing ?? 0.55);
         st.offset[1] += a.amplitude * env * Math.sin(phase) * size;
       }
@@ -195,10 +209,10 @@ export function evalAnim(a, t, idx, size) {
   return st;
 }
 
-export function evalAll(anims, t, idx, size) {
+export function evalAll(anims, t, idx, size, charTimes) {
   const out = IDENTITY_STATE();
   for (const a of anims || []) {
-    const st = evalAnim(a, t, idx, size);
+    const st = evalAnim(a, t, idx, size, charTimes);
     out.offset[0] += st.offset[0];
     out.offset[1] += st.offset[1];
     out.offset[2] += st.offset[2];
@@ -276,19 +290,54 @@ export function evalBackgrounds(keys, t) {
 }
 
 /**
- * Summed envelope of every cue hit at `t`: snaps to 1 the instant a cue lands
- * and decays to 0 over `dur` seconds. Drives the flash, the chromatic split
- * and the camera punch, so every line lands with a bit of weight.
+ * Weight of a cue-gated motion at `t`: 1 the instant its line lands, then a
+ * quadratic decay to 0 over `dur`, 0 outside that window. Mirror of Rust's
+ * `hit_weight`.
+ */
+export function hitWeight(t, at, dur) {
+  const u = (t - at) / Math.max(dur ?? 0.35, 1e-6);
+  if (u < 0 || u > 1) return 0;
+  return (1 - u) * (1 - u);
+}
+
+/**
+ * Largest hit of any cue at `t`. Drives the flash, the chromatic split, the
+ * camera punch and every gated motion, so a whole line lands with one weight
+ * rather than a stack of them.
  */
 export function hitEnvelope(cues, t, dur) {
   if (!cues || cues.length === 0) return 0;
-  const d = Math.max(dur ?? 0.35, 1e-6);
   let best = 0;
   for (const c of cues) {
-    const u = (t - c) / d;
-    if (u < 0 || u > 1) continue;
-    const v = (1 - u) * (1 - u);
+    const v = hitWeight(t, c, dur);
     if (v > best) best = v;
   }
   return best;
+}
+
+/**
+ * Mirror of Rust's `CameraShake::envelope_at`: the window envelope only —
+ * fades in over `ramp`, holds, fades out over `ramp` before `until`.
+ */
+export function shakeEnvelope(s, t) {
+  const at = s.at ?? 0;
+  if (t < at) return 0;
+  const until = s.until;
+  const ramp = Math.max(s.ramp ?? 0.6, 1e-6);
+  if (until !== null && until !== undefined && t > until) return 0;
+  const out = until === null || until === undefined ? 1 : clamp01((until - t) / ramp);
+  return Math.min(clamp01((t - at) / ramp), out);
+}
+
+/**
+ * How much of the hand-held shake is running at `t`. With `hit` gating the
+ * window envelope is multiplied by the cue hit, so the rig is perfectly still
+ * between lines and kicks the instant one lands — a permanent wobble reads as
+ * a tremor, a gated one reads as impact. The gate is evaluated against the
+ * cues directly (not against the FX rack) so `--shake-hit` works on its own.
+ */
+export function shakeWeight(s, t, cues) {
+  const env = shakeEnvelope(s, t);
+  if (env <= 0) return 0;
+  return s.hit ? env * hitEnvelope(cues, t, s.hit_duration ?? 0.55) : env;
 }

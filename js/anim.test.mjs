@@ -7,13 +7,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  charDelay,
   evalAll,
   evalAnim,
   evalBackgrounds,
   hexToRgb,
   hitEnvelope,
+  hitWeight,
   jitterNoise,
   IDENTITY_Q,
+  shakeEnvelope,
+  shakeWeight,
 } from './anim.mjs';
 
 // ---------------------------------------------------------------------------
@@ -286,4 +290,166 @@ test('overlapping cues take the loudest, they never sum past one', () => {
 test('no cues means no hit', () => {
   assert.equal(hitEnvelope([], 3, 0.4), 0);
   assert.equal(hitEnvelope(null, 3, 0.4), 0);
+});
+
+// ---------------------------------------------------------------------------
+// cue-gated text motion: one shudder per line, then it holds still
+// ---------------------------------------------------------------------------
+
+test('hit weight peaks on the cue then decays', () => {
+  assert.equal(hitWeight(1, 2, 0.5), 0, 'before the hit');
+  assert.equal(hitWeight(2.5, 2, 0.5), 0, 'after the ring-out');
+  assert.equal(hitWeight(2, 2, 0.5), 1, 'full weight on the frame it lands');
+  const half = hitWeight(2.25, 2, 0.5);
+  assert.ok(Math.abs(half - 0.25) < 1e-6, `quadratic decay, got ${half}`);
+});
+
+test('a gated wobble shudders with the line, then freezes', () => {
+  const base = {
+    type: 'jitter',
+    amplitude: [0.4, 0.3, 0],
+    frequency: 5,
+    rotation: 0,
+    phase: 0,
+    start_at: 4,
+    stagger: 0,
+    ramp: 0.5,
+    hit_duration: 0.5,
+  };
+  const gated = { ...base, hit: true };
+  assert.deepEqual(evalAnim(gated, 3.9, 0, 1).offset, [0, 0, 0], 'parked before the cue');
+  assert.notDeepEqual(evalAnim(gated, 4.2, 0, 1).offset, [0, 0, 0], 'kicks with the line');
+  assert.deepEqual(evalAnim(gated, 5, 0, 1).offset, [0, 0, 0], 'frozen after the kick');
+  assert.notDeepEqual(evalAnim(base, 5, 0, 1).offset, [0, 0, 0], 'the ungated one keeps running');
+});
+
+test('a gated wave runs one ripple, then the line is still', () => {
+  const w = {
+    type: 'wave',
+    amplitude: 0.5,
+    frequency: 1.5,
+    spacing: 0.7,
+    start_at: 3,
+    ramp: 0.4,
+    hit: true,
+    hit_duration: 2,
+  };
+  assert.equal(evalAnim(w, 2.9, 0, 1).offset[1], 0, 'flat before the cue');
+  assert.notEqual(evalAnim(w, 3.5, 0, 1).offset[1], 0, 'the ripple travels');
+  assert.equal(evalAnim(w, 5.2, 0, 1).offset[1], 0, 'still again');
+});
+
+test('without the flag the old ramp is used untouched', () => {
+  const w = { type: 'wave', amplitude: 0.5, frequency: 1.5, spacing: 0.7, start_at: 3, ramp: 0.4 };
+  // ramp 0.4 → at t = 3.2 the amplitude is smoothstep(0.5) = 0.5 of full,
+  // so the bounced height is exactly half of what it reaches at 3.4 and on.
+  const at32 = evalAnim(w, 3.2, 0, 2).offset[1] / Math.sin(2 * Math.PI * 1.5 * 0.2);
+  const at34 = evalAnim(w, 3.4, 0, 2).offset[1] / Math.sin(2 * Math.PI * 1.5 * 0.4);
+  assert.ok(Math.abs(at32 / at34 - 0.5) < 1e-3, `ramp half-life, got ${at32 / at34}`);
+});
+
+// ---------------------------------------------------------------------------
+// hand-held shake: window envelope + cue gate (twin: src/scene.rs)
+// ---------------------------------------------------------------------------
+
+const SHAKE = { amplitude: 0.03, frequency: 3, roll: 0.006, at: 0, until: null, ramp: 0.8 };
+
+test('shake window fades in, holds and fades out', () => {
+  const s = { ...SHAKE, at: 2, until: 5, ramp: 0.6 };
+  assert.equal(shakeEnvelope(s, 1.0), 0, 'before the start');
+  assert.equal(shakeEnvelope(s, 6.0), 0, 'after the end');
+  assert.equal(shakeEnvelope(s, 2.0), 0, 'ramp begins from zero');
+  assert.equal(shakeEnvelope(s, 3.5), 1, 'fully open in the middle');
+  assert.equal(shakeEnvelope(s, 5.0), 0, 'ramp ends at zero');
+  const half = shakeEnvelope(s, 4.7);
+  assert.ok(Math.abs(half - 0.5) < 1e-6, `symmetric fade-out, got ${half}`);
+
+  assert.equal(shakeEnvelope(SHAKE, 0), 0);
+  assert.equal(shakeEnvelope(SHAKE, 1), 1, 'no `until` means no fade-out');
+  assert.equal(shakeEnvelope(SHAKE, 1e6), 1);
+});
+
+test('an ungated shake runs the whole scene', () => {
+  // `hit` absent or false must leave the old always-on behaviour untouched.
+  assert.equal(shakeWeight(SHAKE, 100, []), 1, 'ramp long finished');
+  assert.equal(shakeWeight({ ...SHAKE, hit: false }, 100, []), 1);
+});
+
+test('a gated shake is dead between cues and kicks on each one', () => {
+  const g = { ...SHAKE, hit: true, hit_duration: 0.55 };
+  const cues = [10, 20];
+  assert.equal(shakeWeight(g, 5, cues), 0, 'silent long before any line');
+  assert.equal(shakeWeight(g, 10, cues), 1, 'full kick the instant a line lands');
+  assert.equal(shakeWeight(g, 10.55, cues), 0, 'the kick rings out');
+  assert.equal(shakeWeight(g, 15, cues), 0, 'dead still mid-scene');
+  assert.equal(shakeWeight(g, 20.2, cues), shakeWeight(g, 20.2, [20]), 'per cue');
+});
+
+test('the gate composes with the window, it does not replace it', () => {
+  const g = { ...SHAKE, at: 2, until: 5, hit: true, hit_duration: 1 };
+  assert.equal(shakeWeight(g, 1, [1]), 0, 'window closed before `at`');
+  assert.equal(shakeWeight(g, 6, [6]), 0, 'window closed after `until`');
+  assert.equal(shakeWeight(g, 4, [5]), 0, 'window open, but the cue is still ahead');
+  assert.ok(shakeWeight(g, 3, [3]) > 0, 'both open');
+});
+
+// ---------------------------------------------------------------------------
+// word timing (one appearance time per glyph)
+// ---------------------------------------------------------------------------
+
+test('a stamped glyph takes its own start time, not the stagger grid', () => {
+  assert.equal(charDelay([10, 10.5, 11], 10, 0.04, 1), 10.5);
+  assert.equal(charDelay(null, 10, 0.04, 1), 10.04, 'no stamps → the grid');
+  assert.equal(charDelay([10], 10, 0.04, 1), 10.04, 'a short list runs onto the grid');
+});
+
+test('word timing drives the fade, the entrance and the wobble alike', () => {
+  const times = [10, 10.5, 11];
+
+  const fade = { type: 'fade', duration: 0.3, stagger: 0.04, start_at: 10, fade_out: 1 };
+  assert.equal(evalAnim(fade, 10.5, 1, 1, times).alpha, 0, 'still dark on its own beat');
+  assert.ok(evalAnim(fade, 10.7, 1, 1, times).alpha > 0, 'then lights up');
+  assert.equal(evalAnim(fade, 10.5, 1, 1, undefined).alpha, 1, 'the grid is unchanged');
+
+  const pop = { type: 'pop', duration: 0.5, stagger: 0.06, start_at: 10, from: 0, ease: 'back_out' };
+  assert.ok(Math.abs(evalAnim(pop, 10.5, 1, 1, times).scale) < 1e-9, 'the pop waits too');
+  assert.ok(evalAnim(pop, 10.5, 1, 1).scale > 0, 'without stamps it has already fired');
+
+  const slide = {
+    type: 'slide',
+    delta: [-6, -2.5, 0],
+    duration: 0.7,
+    stagger: 0.06,
+    ease: 'ease_out_quad',
+    start_at: 10,
+  };
+  assert.equal(evalAnim(slide, 10.5, 1, 1, times).offset[0], -6, 'parked off-frame still');
+  assert.ok(evalAnim(slide, 10.5, 1, 1).offset[0] > -6, 'without stamps it is already moving');
+
+  const jit = {
+    type: 'jitter',
+    amplitude: [0.05, 0.04, 0],
+    frequency: 5,
+    rotation: 0,
+    phase: 0,
+    start_at: 10,
+    stagger: 0,
+    ramp: 0.3,
+    hit: true,
+    hit_duration: 0.55,
+  };
+  assert.deepEqual(evalAnim(jit, 10.4, 1, 2, times).offset, [0, 0, 0], 'silent until it lands');
+  assert.notDeepEqual(evalAnim(jit, 11.0, 1, 2, times).offset, [0, 0, 0], 'shudders on landing');
+});
+
+test('evalAll threads the word timing through every layer', () => {
+  const anims = [
+    { type: 'fade', duration: 0.3, stagger: 0.04, start_at: 10, fade_out: 1 },
+    { type: 'pop', duration: 0.5, stagger: 0.06, start_at: 10, from: 0, ease: 'back_out' },
+  ];
+  const times = [10, 10.5];
+  assert.equal(evalAll(anims, 10.5, 1, 1, times).alpha, 0, 'hidden and un-scaled together');
+  assert.ok(Math.abs(evalAll(anims, 10.5, 1, 1, times).scale) < 1e-9);
+  assert.equal(evalAll(anims, 10.5, 1, 1).alpha, 1, 'the grid still wins without stamps');
+  assert.ok(evalAll(anims, 10.5, 1, 1).scale > 0);
 });

@@ -41,13 +41,56 @@ function toSeconds(m) {
 }
 
 /**
+ * Split a lyric body that carries per-glyph stamps into its plain text and one
+ * appearance time per character.
+ *
+ * Word-timed LRC writes `<mm:ss.xx>` in front of a glyph — or in front of a
+ * run of glyphs, which is how a *word* gets one stamp:
+ *
+ *   `<00:16.54>远<00:16.99>离 … 伤 <00:20.26>我 …`
+ *
+ * Characters after a stamp inherit it until the next stamp, so a multi-glyph
+ * run stays a word and the untagged space between two words lights up with the
+ * word it follows. Text ahead of the first stamp falls back to the line cue.
+ *
+ * @returns {{text: string, charTimes: number[]|null}} `charTimes` is `null`
+ * when the line carries no stamps at all — that is what keeps an ordinary LRC
+ * byte-identical.
+ */
+function splitGlyphTimes(src, lineTime) {
+  // Built per call: a shared `/g` regex would leak `lastIndex` between lines.
+  const re = /<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>|[^<]+|./g;
+  let text = '';
+  const charTimes = [];
+  let at = null;
+  let saw = false;
+  for (let m = re.exec(src); m; m = re.exec(src)) {
+    if (m[1] !== undefined) {
+      at = toSeconds(m);
+      saw = true;
+      continue;
+    }
+    const when = at === null ? lineTime : at;
+    for (const ch of m[0]) {
+      text += ch;
+      charTimes.push(when);
+    }
+  }
+  if (!saw) return { text: src, charTimes: null };
+  return { text, charTimes };
+}
+
+/**
  * Parse LRC text.
  *
  * @returns {{meta: Object<string,string>, offsetMs: number,
- *            lines: Array<{time: number, text: string, tags?: Object<string,string>}>}}
+ *            lines: Array<{time: number, text: string, tags?: Object<string,string>,
+ *                          charTimes?: number[]}>}}
  * `lines` is sorted by time; a line carrying several `[mm:ss.xx]` prefixes
  * becomes several entries (the standard repeat-line idiom). Per-line overrides
  * such as `{e:fall}` land in `tags`, and only when a line actually carries one.
+ * A word-timed line additionally carries `charTimes` — one absolute time per
+ * character — and only then.
  */
 export function parseLrc(src) {
   const meta = {};
@@ -69,9 +112,16 @@ export function parseLrc(src) {
     }
     if (times.length) {
       const { tags, text } = splitTags(rest.replace(/^[\s:]+/, '').trim());
+      const glyph = splitGlyphTimes(text, times[0]);
       for (const t of times) {
-        const entry = { time: t, text };
+        const entry = { time: t, text: glyph.text };
         if (Object.keys(tags).length) entry.tags = tags;
+        // A repeated stamp (`[00:10][00:50]词 …`) replays the same run, so
+        // slide its glyph times to sit on this copy's own line cue.
+        if (glyph.charTimes) {
+          const shift = t - times[0];
+          entry.charTimes = shift === 0 ? glyph.charTimes : glyph.charTimes.map((v) => v + shift);
+        }
         lines.push(entry);
       }
       continue;
@@ -102,6 +152,9 @@ export function applyOffset(parsed, offsetMs = parsed.offsetMs) {
   return parsed.lines.map((l) => {
     const out = { time: l.time - shift, text: l.text };
     if (l.tags) out.tags = l.tags;
+    // Per-glyph times ride along with the line, shifted by the same amount —
+    // they are meaningless relative to a cue that just moved.
+    if (l.charTimes) out.charTimes = l.charTimes.map((v) => v - shift);
     return out;
   });
 }
@@ -126,6 +179,11 @@ const clampNum = (v, fallback, lo, hi) => {
  * line is lit at a time. `entrance` adds a motion layer on top of the fade —
  * both layers share the same `start_at`, so the line slides/drops in while it
  * fades up.
+ *
+ * A line carrying per-glyph stamps additionally gets `char_times`, and every
+ * staggered layer then reads its delay from there instead of from
+ * `start_at + idx * stagger`: the line arrives one word at a time, on the
+ * singer's rhythm rather than on a fixed grid.
  *
  * @param {Array<{time:number,text:string,tags?:Object<string,string>}>} lines
  * @param {object} opts see the destructuring below
@@ -156,10 +214,18 @@ export function buildLyricTexts(lines, opts = {}) {
 
     const entrance = lineEntrance(line, baseEntrance);
     const t = round3(line.time + offset);
+    // Word-timed lines light up glyph by glyph, so the fade-out has to wait for
+    // the last one — otherwise the tail of a line would start disappearing the
+    // moment it appears. Absent per-glyph times nothing changes here.
+    const charTimes = Array.isArray(line.charTimes)
+      ? line.charTimes.slice(0, line.text.length).map((v) => round3(v + offset))
+      : null;
+    const lastGlyph = charTimes && charTimes.length ? Math.max(...charTimes) : t;
     const nextRaw = lines[i + 1] ? lines[i + 1].time + offset : total;
     const next = Number.isFinite(nextRaw) ? nextRaw : t + 3;
     // Never let a line outlive the next cue, and always leave room to fade.
-    const outAt = round3(Math.max(t + 0.1, Math.min(next, t + (opts.hold ?? 1e9)) - fadeOut));
+    let outAt = round3(Math.max(t + 0.1, Math.min(next, t + (opts.hold ?? 1e9)) - fadeOut));
+    if (charTimes) outAt = round3(Math.max(outAt, lastGlyph + 0.15));
 
     const animations = [
       {
@@ -217,6 +283,10 @@ export function buildLyricTexts(lines, opts = {}) {
       animations,
     };
     if (fit !== null) block.fit_width = fit;
+    // One absolute start time per glyph. It rides on the block rather than on
+    // any one animation because the fade, the entrance and the wobble all have
+    // to fall on the same rhythm.
+    if (charTimes) block.char_times = charTimes;
     out.push(block);
   }
   return out;
@@ -261,7 +331,7 @@ function buildJitter(jitter, i, t) {
         return [a, a * 0.8, 0];
       })();
   if (!amp.some((v) => v)) return null;
-  return {
+  const out = {
     type: 'jitter',
     amplitude: amp.map(round3),
     frequency: round3(num(j.frequency, 5)),
@@ -271,6 +341,13 @@ function buildJitter(jitter, i, t) {
     stagger: round3(num(j.stagger, 0)),
     ramp: round3(num(j.ramp, 0.5)),
   };
+  // Written only when asked for, so scenes without the flag stay
+  // byte-identical.
+  if (j.hit) {
+    out.hit = true;
+    out.hit_duration = round3(num(j.hit_duration, 0.55));
+  }
+  return out;
 }
 
 /**
@@ -282,7 +359,7 @@ function buildWave(wave, i, t) {
   const w = typeof wave === 'object' ? wave : { amplitude: wave };
   const amp = num(w.amplitude, 0.2);
   if (!amp) return null;
-  return {
+  const out = {
     type: 'wave',
     amplitude: round3(amp),
     frequency: round3(num(w.frequency, 1.6)),
@@ -290,6 +367,11 @@ function buildWave(wave, i, t) {
     start_at: round3(t + num(w.delay, 0)),
     ramp: round3(num(w.ramp, 0.4)),
   };
+  if (w.hit) {
+    out.hit = true;
+    out.hit_duration = round3(num(w.hit_duration, 2.0));
+  }
+  return out;
 }
 
 /**

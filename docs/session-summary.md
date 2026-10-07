@@ -504,13 +504,91 @@ PowerShell 5.1 的 `Get-Content`（**不带 `-Encoding`**）会把无 BOM 的 UT
 共 15 处，并扫描全部源文件确认零残留；同一函数还修出 `--help` 里 `titleOut` 取错变量的显示 bug。
 **以后一律用 read/edit/write 工具，或 `Get-Content -Encoding UTF8`。**
 
-## 六、v4 成片已交付 + 下一步
+### 5.16 PV 脚本落地 A+B：33 段配色时间线 + 每句独立入场（`scenes/bird.json` v5）
 
-**`out/鸟之诗-v4.mp4` 已交付**（232.2 MB）：
+外部 PV 脚本按句给了 `V:背景 / E:文字动效 / P:粒子` 三轨。对账结论：
+**V 能换色不能换景**（skydome 只有渐变+星云+地平线光带+星点，没有具象画面）、
+**E 只有 4 种且原本是全局的**、**P 完全没有粒子系统**。
+本轮只做 A（背景）与 B（入场），粒子/弧形排版/运动模糊留待后续。
+
+**A. 33 段配色 —— `--bg-cut` 支持内联 hex 调色板**
+
+`js/lrc2scene.mjs::parseCut`（原 `buildBackgrounds` 里的内联解析拆出来）：
+
+```
+--bg-cut 24.152:aurora                                  # 命名 look（原样支持）
+--bg-cut 24.152:#00303a/#01121a/#6cffd0@0.75,0.7,1.1    # top/bottom/accent@nebula,stars,drift
+```
+
+- 行尾 ` # 注释` 会先剥掉（hex 前不会有空白，`search(/\s#/)` 判据安全）。
+- accent 自带滑杆，所以 `split('/')` 只有 3 段，`parts[2].split('@')` 再拆滑杆。
+- 校验 `#rrggbb`，滑杆 `RATIO()` 夹到 0..1 / 0..1 / 0..4。
+- `evalBackgrounds` 本就是线性扫 key，**34 个 key（opener night + 33 切点）无上限**。
+
+配色脚本单独存 `scenes/bird.bgcuts`（一行一个切点 + 中文注释），由调用方展开成
+`--bg-cut` 参数 —— 不新增 CLI 旗标，文件仍是唯一可 diff 的真源。
+
+**B. 每句独立入场 —— LRC 行内 `{e:…}` 标签**
+
+```
+[00:16.575]{e:pop}远离那些繁华悲伤 我们从此告别了过往
+[00:11.246]{e:none}天空里早已留下了 永恒的神话
+```
+
+- `js/lrc.js::splitTags` + `TAG_RE`：大括号在 LRC 里不可能是歌词内容，两套语法不冲突。
+- 只有真带标签的行才写 `tags` 键 → **无标签的场景输出逐字节不变**（`applyOffset` 同理）。
+- `lineEntrance()` 解析每句，未知 mode **直接抛错**而不是静默降级（一句 PV 走错动效要能被发现）。
+- **⚠ 踩过的坑**：`lrc2scene.mjs::main` 里 `applyOffset(parsed).map(l => ({time, text}))`
+  会把 `tags` 丢掉，标签解析了却用不上。**新增行级字段必须同时补这条 map。**
+
+**C. 反推原命令（值得复用的手法）**
+
+场景 JSON 里全量留着生成参数，倒推 `lrc2scene` 命令后，用
+「无标签 LRC + 原 6 切点 → 生成 → 与 `bird.v4.bak.json` 逐字节比对」自证：
+**BYTE-IDENTICAL ✓**。反推时漏了 `--keep-open`，表现为末行 fade 对象的
+`fade_out` / `fade_out_at` **键序**不同（值完全一样）—— 这就是 keepOpen 删键后重加的痕迹。
+
+**D. 验证（全过）**
+
+- `evalBackgrounds` 逐切点取稳定时刻（切点 + 2.4s，密间距取下一刀前 0.1s）：
+  **33/33 的 top/bottom/accent 与手写调色板逐字节一致**。
+- 入场分布：`pop 12 / slide 10 / none 6 / fall 5`，标题卡与尾卡仍 `slide`；
+  渲染文本零 `{}` 泄漏。
+- `node --test js/anim.test.mjs js/lrc.test.mjs` **37 pass / 0 fail**（新增 7 条标签测试）；
+  `cargo test` **25 + 1**、`cargo clippy --all-targets` **0 警告**、`cargo fmt --check` 干净。
+- `render.js --probe cues` → **probe ok — every cue is lit**（37/37）。
+- 成片抽帧天空色：t=19 / 102.5 / 185.8 / 266.5 / 290.1 → **5 个样本 5 个不同**；
+  其中 t=266.5 全 `[0,0,0]` 正是 `#000000` 那把调色板，数据→像素直接对上。
+
+**E. 复现命令（v5）**
+
+```
+$cuts = Get-Content scenes/bird.bgcuts -Encoding UTF8 | ? { $_.Trim() -and -not $_.Trim().StartsWith('#') }
+$a = @('scenes/bird.lrc','-o','scenes/bird.json',
+  '--size','1.7','--y','-0.3','--color','#eafcff','--outline','#6bd9ff',
+  '--title','鸟之诗','--subtitle','中文版 feat. 重音テト · HANA',
+  '--jitter','0.035','--jitter-rot','0.01','--jitter-freq','3','--wave','0.09',
+  '--dolly','12.6','--crane','0.22','--move-at','45','--move-dur','275',
+  '--shake','0.03','--shake-roll','0.006','--shake-freq','3',
+  '--duration','367','--outro-at','318','--keep-open',
+  '--bg-look','night','--bg-fade','2',
+  '--fx','--fx-flash','0.18','--fx-punch','0.30','--fx-vignette','0.5',
+       '--fx-chromatic','0.0014','--fx-sat','1.10')
+foreach($c in $cuts){ $a += '--bg-cut'; $a += $c }
+node js/lrc2scene.mjs @a
+```
+`--bg-fade` 从 3 收到 **2**：33 刀之后最近的两刀只隔 2.33 s（278.693 / 281.024），
+fade 3 会被下一刀打断而跳变。
+
+## 六、v5 成片已交付 + 下一步
+
+**`out/鸟之诗-v5.mp4` 已交付**（231.7 MB，当前成片）：
 00:06:07.00 / 1920x1080 / 60 fps / h264 High yuv420p / AAC-LC 48 kHz stereo **192 kb/s**。
-内容 = v3 全部动效 + **六段背景随歌词换色（60/130/195/255/318 s）** + 暗角/色差/饱和 + 每句 cue 的闪白与镜头 punch。
+内容 = v4 全部内容 + **33 段逐句配色背景（`--bg-cut` 内联 hex，fade 2 s）** +
+**33 句各不相同的入场（`{e:pop/slide/fall/none}` 行内标签）**。
+渲染方式同 F 节：8 段 × 3000 帧 + `ffmpeg -f concat -c copy`，一次通过。
 
-**落片验证（数值级，全部通过）**
+**v4 落片验证（数值级，全部通过）**
 
 | t | 参考静帧 `f_<t>.png` 顶点 | 成片 `v4chk_<t>.png` 顶点 | 参考角落 | 成片角落 |
 |---|---|---|---|---|
@@ -542,20 +620,136 @@ ffmpeg -y -f concat -safe 0 -i concat.txt -c copy -movflags +faststart bird_v4.m
   拼接处干净；`-c copy` 不重编码。
 - 已知小坑：某段收尾会偶发 `Error writing trailer … Permission denied`（疑似杀软扫文件），
   **删掉该段重跑即可**，不要去动别的。
-- 拼接前记得删掉上一次失败残留的 `bird_v4.mp4`（它会占住输出路径）。
+- 拼接前记得删掉上一次失败残留的 `bird_v5.mp4`（它会占住输出路径）。
 
 **已交付（保留作对照）**
-- v4：`out/鸟之诗-v4.mp4`（232.2 MB）—— + 背景时间线 + FX 机架。
+- v6：`out/鸟之诗-v6.mp4`（166.7 MB）—— + 把常驻抖动改成「落词才动」的打击感（§七，**当前成片**）。
+- v5：`out/鸟之诗-v5.mp4`（231.7 MB）—— + 33 段逐句配色 + 每句独立入场。
+- v4：`out/鸟之诗-v4.mp4`（232.2 MB）—— + 六段背景时间线 + FX 机架。
 - v3：`out/鸟之诗-v3.mp4`（173.2 MB / 6:07.00 / AAC 192k）—— jitter/wave/推镜/手持/outro。
 - v2：`out/鸟之诗.mp4`（109.4 MB）—— 无动效、无 outro。
-- 中间产物：`target/chamina/v4_p0..7.mp4`（分段，可删）、`v4chk_*.png`、`f_*.png`、`bird_v4.mp4`（无音轨母版）。
+- 中间产物：`target/chamina/v6_p0..7.mp4` 与 `v5_p0..7.mp4`、`v4_p0..7.mp4`（分段，可删）、
+  `v6chk_*` / `v5chk_*` / `v4chk_*` / `f_*.png`、`bird_v6.mp4` / `bird_v5.mp4` / `bird_v4.mp4`（无音轨母版）、
+  `target/chamina/bird.v6.bak.json`（v6 场景备份）、`bird.v4.bak.json`（v4 场景备份，反推命令的比对基准）。
 
 **下一步**
-1. 就片对片，讨论 ⑤PV 脚本 / ④Test-Debug / ⑥⑦Bug 修复 / ⑨GUI 上传 / ⑩后续更新。
-2. 编辑器 UI 还没有背景切换与 `--fx` / `--outro-at` 的开关（目前只能改 JSON / LRC 表单）。
-3. 粒子按行配色、line2/line3 视觉权重（沿用第四节遗留项）。
-4. `docs/session-summary.md` 第四节仍停在更早一轮，需与五、六节合并去重。
-5. 渲完可清理：`target/chamina/pf*.mp4`、`hit_*`、`bgv_*`、`scene.js.bak`、`v4.out/err/pid`、
-   `render-v4.cmd`、`schtasks /delete /tn chamina-v4`。
+1. 就片对片，讨论 ⑤PV 脚本剩余的 P 轨（粒子）/ ④Test-Debug / ⑥⑦Bug 修复 / ⑨GUI 上传 / ⑩后续更新。
+2. **粒子系统**（PV 脚本 P 轨，33 句全缺）—— 必须先跑 2 秒性能样板：
+   SwiftShader 对逐像素开销极敏感（§5.15 C 的教训）。
+3. 编辑器 UI 还没有背景切换、`{e:…}` 入场编辑与 `--fx` / `--outro-at` 的开关
+   （目前只能改 JSON / LRC 表单）。
+4. 弧形排版 / 逐字高亮 / glitch —— PV 脚本 E 轨里 `scene.js` 目前做不到的部分。
+5. 粒子按行配色、line2/line3 视觉权重（沿用第四节遗留项）。
+6. `docs/session-summary.md` 第四节仍停在更早一轮，需与五、六节合并去重。
+7. 清理：`target/chamina/pf*.mp4`、`hit_*`、`bgv_*`、`scene.js.bak`、
+   `v5_*.png` / `v4chk_*` 等抽帧。
+
+## 七、逐字入场（word timing）—— v7 第 1 步
+
+**输入**：用户给了新 LRC `C:\Users\马文\Downloads\鸟之诗.lrc`，每字一个
+`<mm:ss.xx>`，要求「一个一个词地出现」。
+
+**时间轴换源**：33 行歌词逐行比对，文字 33/33 完全一致，但行起点与旧
+`scenes/bird.lrc` 差 **-0.59 ~ +0.49 s（均值 +0.18 s）**，不是常数偏移，说明
+两份 LRC 是不同的对轴结果。新文件行起点与它自己的逐字戳自洽（`[00:16.54]`
+= 第一个 `<00:16.54>`），因此**整份采信新时间轴**：
+
+- `scenes/bird.lrc` ← 新文件正文 **+ 旧行内 `{e:pop/slide/fall/none}` 标签**
+  （33/33 按行序合并，合并前先断言两份歌词文本逐行相等）。
+- `scenes/bird.bgcuts` 33 个切点按同一逐行 delta 平移（切点与歌词 cue 保持
+  1:1 的既有约定），首刀 `16.575 → 16.540`。
+- 标题卡出场随之从 `15.375 → 15.34`（`--title-out` 默认 = 首句 - 1.2）。
+
+### 7.1 数据通路（一条数据，四处落地）
+
+`splitGlyphTimes` (`js/lrc.js`)
+→ `line.charTimes`（`parseLrc` / `applyOffset` / `lrc2scene::main` 三处都要带，
+  否则**解析了却用不上**——老坑的逐字版）
+→ `texts[].char_times` (`buildLyricTexts`)
+→ `TextSpec.char_times` (Rust 反序列化) → `TextExport.char_times` (序列化)
+→ `state.chars[].charTimes` (`scene.js::buildText`)
+→ `evalAll(anims, t, idx, size, charTimes)` → `charDelay(...)`
+
+语义：**块级一个 `char_times` 数组**（每字一个绝对时刻），不是塞进某个动画。
+因为 fade、入场、抖动三层必须踩同一个节奏；而且 `AnimationSpec` 是 `Copy`，
+往动画变体里加 `Vec` 会把整条 Copy 链打断。
+
+### 7.2 语义细节
+
+- 印章管到下一个印章为止 → **一个词共用一个戳**（天然「一个一个词」），
+  中间没打戳的空格跟着它前面的词亮；第一个戳之前的文字回退到行 cue。
+- `char_delay` 缺戳就回落到 `start_at + idx * stagger` 网格（Rust `char_delay`
+  / JS `charDelay`，含「数组比行短」的情况），**无戳场景一个字节都不变**。
+- `outAt = max(原值, 最后一字 + 0.15)`，仅在有 `charTimes` 时生效：否则行尾
+  会在刚出现时就开始淡出。bird.lrc 实测最紧的一句（`在我们身旁`）仍留 0.21 s
+  余量，33 句无一与下一句重叠（`lrc.test.mjs` 有断言）。
+- `render.js --probe cues` 的采样点：有戳的行改取**最后一字 + 0.4 s**（夹在
+  cue 窗口内），否则按老规矩取窗口中点——否则会抓到「只亮了半行」的瞬间。
+
+### 7.3 ⚠ 踩到的坑
+
+- 只改 `scene.js::buildText` 把 `charTimes` 存进字符、**忘了改 `setFrame` 的
+  `evalAll(c.animations, t, c.idx, c.size)`**，跑起来一切正常但逐字节奏完全
+  没生效。靠 `--probe 16.6,17.0,17.5,…` 逐时刻数可见字数才看出来（16.6/17.0/
+  17.5 = 1/8/15 是**均匀网格**的形状；补上传参后变成 1/2/3 = 与戳完全对齐）。
+  → 新增任何动画参数，**必须同时改「求值入口」**，不只是数据入口。
+
+### 7.4 验证（全过）
+
+- `node --test js/anim.test.mjs js/lrc.test.mjs` → **56 pass / 0 fail**（+10）。
+- `cargo test` **30 + 1 doc-test**、`cargo clippy --all-targets` 0 警告、
+  `cargo fmt --check` 干净。
+- **字节回归**：拿无戳的旧 LRC + 旧 bgcuts 跑同一条命令 →
+  `85A489BEBB637C71261F96E39DF553E0CCD2110F2DE9D91E9CA07F991ADC411A`，
+  与 `target/chamina/bird.v6.bak.json` 完全一致 ✓。
+- `cargo build` → `chamina-render scenes/bird.json --dry-run` → 导出的
+  `scene_data.json`：37 行里 33 行带 `char_times`，`line0` 18 字 18 戳、
+  17 个有轮廓 mesh（空格不发 mesh，但 `CharExport.idx` 是**原字符串下标**，
+  所以戳数组必须含空格）。
+- `render.js --probe cues` → **probe ok — every cue is lit（37/37）**。
+- 逐时刻字数（line0，戳 16.54…22.56）：
+  `16.6→1 / 17.0→2 / 17.5→3 / 18.0→5 / 18.5→7 / 19.0→8 / 20.3→9 / 21.0→11 /
+  21.5→13 / 22.6→17`，与 LRC 逐字戳一一对上。
+- 静帧 t=17.0 / 19.0 / 23.0 → 420 / 515 / 628 KB，文字行灰度 `.` → `=+` →
+  `=+==-`（越来越亮，非黑）。
+- `node js/editor-check.mjs` → `no page errors`，542 glyphs。
+
+### 7.5 复现命令（v6 基线，同时也是 v7 的生成命令）
+
+反推自 `bird.v6.bak.json`（场景里全量留着生成参数），验证方式 = 用它跑
+**旧** LRC/bgcuts 与备份逐字节比对。v7 只需把输入换成现在这版
+`scenes/bird.lrc` + `scenes/bird.bgcuts`：
+
+```powershell
+$cuts = Get-Content scenes/bird.bgcuts -Encoding UTF8 | ? { $_.Trim() -and -not $_.Trim().StartsWith('#') }
+$a = @('scenes/bird.lrc','-o','scenes/bird.json',
+  '--size','1.7','--y','-0.3','--color','#eafcff','--outline','#6bd9ff',
+  '--title','鸟之诗','--subtitle','中文版 feat. 重音テト · HANA',
+  '--jitter','0.035','--jitter-rot','0.01','--jitter-freq','3','--wave','0.09',
+  '--dolly','12.6','--crane','0.22','--move-at','45','--move-dur','275',
+  '--shake','0.03','--shake-roll','0.006','--shake-freq','3',
+  '--shake-hit','--jitter-hit','--wave-hit',
+  '--duration','367','--outro-at','318','--keep-open',
+  '--bg-look','night','--bg-fade','2',
+  '--fx','--fx-flash','0.18','--fx-punch','0.30','--fx-vignette','0.5',
+       '--fx-chromatic','0.0014','--fx-sat','1.10')
+foreach($c in $cuts){ $a += '--bg-cut'; $a += $c }
+node js/lrc2scene.mjs @a
+cargo build
+D:\ChaminaTarget\x86_64-pc-windows-gnu\debug\chamina-render.exe scenes\bird.json --dry-run
+node js/render.js --data target/chamina/scene_data.json --probe cues
+```
+（无戳基线的 SHA 见 7.4；`target/chamina/v6_src.lrc` / `v6_src.bgcuts` 是
+从 `git show HEAD:` 导出的旧输入，留作回归比对。）
+
+### 7.6 下一步（用户已给出的方向）
+
+1. **空间排版 + 逐句运镜**：文字不再挤在同一位置，各句摆到画面不同处，
+   相机按句换目标（`OrbitCam` 加 `stops: Vec<CameraMove>` 序列），
+   上一句**出画框才淡出**；布局「各种都有」。
+2. **入场加张力**：位移过冲 + 缩放过冲（`ENTRANCES` 加新 mode，
+   `Ease::BackOut` 已在 `pop` 上验证过）。
+3. 粒子云 x∈[-35,35] / y∈[-25,45] / z∈[-42.5,2.5] 是硬编码的，
+   排版一拉开就得改由文字 bbox 推导（`js/scene.js:295`）。
 
 

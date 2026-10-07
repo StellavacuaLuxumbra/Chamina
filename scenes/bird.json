@@ -57,7 +57,9 @@
       "roll": 0.006,
       "at": 0,
       "until": null,
-      "ramp": 0.8
+      "ramp": 0.8,
+      "hit": true,
+      "hit_duration": 0.55
     }
   },
   "lights": {
@@ -125,7 +127,7 @@
           "duration": 0.9,
           "stagger": 0.05,
           "start_at": 1.2,
-          "fade_out_at": 15.375,
+          "fade_out_at": 15.34,
           "fade_out": 0.9
         }
       ],
@@ -169,7 +171,7 @@
           "duration": 0.9,
           "stagger": 0.03,
           "start_at": 1.2,
-          "fade_out_at": 15.375,
+          "fade_out_at": 15.34,
           "fade_out": 0.9
         }
       ],
@@ -288,7 +290,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 16.575,
+          "start_at": 16.54,
           "from": 0,
           "ease": "back_out"
         },
@@ -296,8 +298,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 16.575,
-          "fade_out_at": 23.702,
+          "start_at": 16.54,
+          "fade_out_at": 24.11,
           "fade_out": 0.45
         },
         {
@@ -310,20 +312,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 0,
-          "start_at": 16.975,
+          "start_at": 16.94,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 16.575,
-          "ramp": 0.4
+          "start_at": 16.54,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        16.54,
+        16.99,
+        17.28,
+        17.5,
+        17.73,
+        18.17,
+        18.48,
+        18.67,
+        18.67,
+        20.26,
+        20.52,
+        20.78,
+        21.01,
+        21.25,
+        21.53,
+        21.8,
+        22.24,
+        22.56
+      ]
     },
     {
       "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
@@ -350,7 +376,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 24.152,
+          "start_at": 24.56,
           "from": 0,
           "ease": "back_out"
         },
@@ -358,8 +384,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 24.152,
-          "fade_out_at": 30.698,
+          "start_at": 24.56,
+          "fade_out_at": 30.95,
           "fade_out": 0.45
         },
         {
@@ -372,20 +398,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 1.7,
-          "start_at": 24.552,
+          "start_at": 24.96,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 24.152,
-          "ramp": 0.4
+          "start_at": 24.56,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        24.56,
+        24.91,
+        25.18,
+        25.4,
+        25.65,
+        26.05,
+        26.33,
+        26.52,
+        26.52,
+        28.02,
+        28.26,
+        28.51,
+        28.76,
+        29.01,
+        29.29,
+        29.61,
+        29.98,
+        30.32
+      ]
     },
     {
       "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
@@ -418,14 +468,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 31.148
+          "start_at": 31.4
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 31.148,
-          "fade_out_at": 39.433,
+          "start_at": 31.4,
+          "fade_out_at": 39.62,
           "fade_out": 0.45
         },
         {
@@ -438,20 +488,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 3.4,
-          "start_at": 31.548,
+          "start_at": 31.8,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 31.148,
-          "ramp": 0.4
+          "start_at": 31.4,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        31.4,
+        31.64,
+        32.07,
+        32.48,
+        32.96,
+        32.96,
+        33.5,
+        33.95,
+        34.29,
+        34.46,
+        34.46,
+        35.86,
+        36.12,
+        36.41,
+        36.66,
+        36.9,
+        37.18,
+        37.41,
+        37.89,
+        38.18,
+        38.38
+      ]
     },
     {
       "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
@@ -484,14 +561,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 39.883
+          "start_at": 40.07
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 39.883,
-          "fade_out_at": 53.234,
+          "start_at": 40.07,
+          "fade_out_at": 53.47,
           "fade_out": 0.45
         },
         {
@@ -504,20 +581,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 5.1,
-          "start_at": 40.283,
+          "start_at": 40.47,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 39.883,
-          "ramp": 0.4
+          "start_at": 40.07,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        40.07,
+        40.62,
+        40.86,
+        41.08,
+        41.32,
+        41.81,
+        42.11,
+        42.28,
+        42.28,
+        44.01,
+        44.19,
+        44.4,
+        44.62,
+        44.84,
+        45.08,
+        45.34,
+        47.21,
+        47.21,
+        48.86,
+        49.26,
+        51.2
+      ]
     },
     {
       "text": "在初遇的那地方 我们曾眷恋不已 梦想",
@@ -544,7 +648,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 53.684,
+          "start_at": 53.92,
           "from": 0,
           "ease": "back_out"
         },
@@ -552,8 +656,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 53.684,
-          "fade_out_at": 61.032,
+          "start_at": 53.92,
+          "fade_out_at": 61.44,
           "fade_out": 0.45
         },
         {
@@ -566,20 +670,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 6.8,
-          "start_at": 54.084,
+          "start_at": 54.32,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 53.684,
-          "ramp": 0.4
+          "start_at": 53.92,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        53.92,
+        54.19,
+        54.51,
+        54.89,
+        55.14,
+        55.5,
+        55.86,
+        55.86,
+        56.34,
+        56.79,
+        57.08,
+        57.46,
+        57.82,
+        58.31,
+        58.56,
+        58.56,
+        59.91,
+        60.43
+      ]
     },
     {
       "text": "面对迷惘 也不要放弃了希望",
@@ -606,7 +734,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 61.482,
+          "start_at": 61.89,
           "from": 0,
           "ease": "back_out"
         },
@@ -614,8 +742,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 61.482,
-          "fade_out_at": 68.906,
+          "start_at": 61.89,
+          "fade_out_at": 69.22,
           "fade_out": 0.45
         },
         {
@@ -628,20 +756,39 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 8.5,
-          "start_at": 61.882,
+          "start_at": 62.29,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 61.482,
-          "ramp": 0.4
+          "start_at": 61.89,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        61.89,
+        62.1,
+        62.42,
+        62.78,
+        62.78,
+        63.01,
+        63.37,
+        63.7,
+        64.31,
+        64.56,
+        64.89,
+        65.29,
+        65.65
+      ]
     },
     {
       "text": "就像是盛开的花 对阳光不变的那信仰",
@@ -674,14 +821,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 69.356
+          "start_at": 69.67
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 69.356,
-          "fade_out_at": 76.796,
+          "start_at": 69.67,
+          "fade_out_at": 77.21,
           "fade_out": 0.45
         },
         {
@@ -694,20 +841,43 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 10.2,
-          "start_at": 69.756,
+          "start_at": 70.07,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 69.356,
-          "ramp": 0.4
+          "start_at": 69.67,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        69.67,
+        69.89,
+        70.24,
+        70.59,
+        70.83,
+        71.22,
+        71.55,
+        71.55,
+        72.07,
+        72.49,
+        72.76,
+        73.16,
+        73.5,
+        73.98,
+        74.26,
+        75.44,
+        75.99
+      ]
     },
     {
       "text": "天空里早已留下了 永恒的神话",
@@ -734,8 +904,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 77.246,
-          "fade_out_at": 83.897,
+          "start_at": 77.66,
+          "fade_out_at": 83.67,
           "fade_out": 0.45
         },
         {
@@ -748,20 +918,40 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 11.9,
-          "start_at": 77.646,
+          "start_at": 78.06,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 77.246,
-          "ramp": 0.4
+          "start_at": 77.66,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        77.66,
+        77.86,
+        78.19,
+        78.56,
+        78.77,
+        79.13,
+        79.42,
+        79.94,
+        79.94,
+        80.34,
+        80.6,
+        81.76,
+        82.21,
+        82.64
+      ]
     },
     {
       "text": "在夏天的操场 静静地眺望 在远方",
@@ -788,7 +978,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 84.347,
+          "start_at": 84.12,
           "from": 0,
           "ease": "back_out"
         },
@@ -796,8 +986,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 84.347,
-          "fade_out_at": 91.619,
+          "start_at": 84.12,
+          "fade_out_at": 92.11,
           "fade_out": 0.45
         },
         {
@@ -810,20 +1000,42 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 13.6,
-          "start_at": 84.747,
+          "start_at": 84.52,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 84.347,
-          "ramp": 0.4
+          "start_at": 84.12,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        84.12,
+        84.6,
+        84.8,
+        85.05,
+        85.31,
+        85.48,
+        85.48,
+        87.11,
+        87.57,
+        88.04,
+        88.55,
+        89.51,
+        89.51,
+        91.16,
+        91.44,
+        91.68
+      ]
     },
     {
       "text": "连绵不断 是回忆之间的海洋",
@@ -856,14 +1068,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 92.069
+          "start_at": 92.56
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 92.069,
-          "fade_out_at": 99.627,
+          "start_at": 92.56,
+          "fade_out_at": 99.72,
           "fade_out": 0.45
         },
         {
@@ -876,20 +1088,39 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 15.3,
-          "start_at": 92.469,
+          "start_at": 92.96,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 92.069,
-          "ramp": 0.4
+          "start_at": 92.56,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        92.56,
+        92.97,
+        93.25,
+        93.41,
+        93.41,
+        95.94,
+        96.15,
+        96.4,
+        96.88,
+        97.11,
+        97.4,
+        97.72,
+        98.09
+      ]
     },
     {
       "text": "穿过云端 是谁的天堂 在召唤",
@@ -916,7 +1147,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 100.077,
+          "start_at": 100.17,
           "from": 0,
           "ease": "back_out"
         },
@@ -924,8 +1155,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 100.077,
-          "fade_out_at": 107.495,
+          "start_at": 100.17,
+          "fade_out_at": 107.85,
           "fade_out": 0.45
         },
         {
@@ -938,20 +1169,40 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 17,
-          "start_at": 100.477,
+          "start_at": 100.57,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 100.077,
-          "ramp": 0.4
+          "start_at": 100.17,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        100.17,
+        100.74,
+        101.09,
+        101.26,
+        101.26,
+        102.79,
+        103.2,
+        103.68,
+        104.19,
+        105.22,
+        105.22,
+        106.88,
+        107.13,
+        107.5
+      ]
     },
     {
       "text": "她在寻访 那沉睡千年的答案",
@@ -982,14 +1233,14 @@
           "gravity": -3,
           "drift": 0,
           "wobble": 0,
-          "start_at": 107.945
+          "start_at": 108.3
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 107.945,
-          "fade_out_at": 114.268,
+          "start_at": 108.3,
+          "fade_out_at": 114.18,
           "fade_out": 0.45
         },
         {
@@ -1002,20 +1253,39 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 18.7,
-          "start_at": 108.345,
+          "start_at": 108.7,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 107.945,
-          "ramp": 0.4
+          "start_at": 108.3,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        108.3,
+        108.72,
+        109.04,
+        109.21,
+        109.21,
+        111.75,
+        111.95,
+        112.18,
+        112.58,
+        112.8,
+        113.06,
+        113.41,
+        113.81
+      ]
     },
     {
       "text": "远离那些繁华悲伤 我们从此告别了过往",
@@ -1042,8 +1312,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 114.718,
-          "fade_out_at": 121.969,
+          "start_at": 114.63,
+          "fade_out_at": 122.08,
           "fade_out": 0.45
         },
         {
@@ -1056,20 +1326,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 20.4,
-          "start_at": 115.118,
+          "start_at": 115.03,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 114.718,
-          "ramp": 0.4
+          "start_at": 114.63,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        114.63,
+        115.21,
+        115.44,
+        115.7,
+        116.01,
+        116.47,
+        116.77,
+        116.95,
+        116.95,
+        118.48,
+        118.76,
+        119.05,
+        119.28,
+        119.53,
+        119.78,
+        120.04,
+        120.47,
+        120.78
+      ]
     },
     {
       "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
@@ -1096,7 +1390,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 122.419,
+          "start_at": 122.53,
           "from": 0,
           "ease": "back_out"
         },
@@ -1104,8 +1398,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 122.419,
-          "fade_out_at": 128.913,
+          "start_at": 122.53,
+          "fade_out_at": 129.13,
           "fade_out": 0.45
         },
         {
@@ -1118,20 +1412,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 22.1,
-          "start_at": 122.819,
+          "start_at": 122.93,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 122.419,
-          "ramp": 0.4
+          "start_at": 122.53,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        122.53,
+        123.06,
+        123.3,
+        123.55,
+        123.86,
+        124.33,
+        124.63,
+        124.81,
+        124.81,
+        126.44,
+        126.66,
+        126.91,
+        127.16,
+        127.4,
+        127.66,
+        127.9,
+        128.28,
+        128.58
+      ]
     },
     {
       "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
@@ -1158,8 +1476,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 129.363,
-          "fade_out_at": 137.527,
+          "start_at": 129.58,
+          "fade_out_at": 137.85,
           "fade_out": 0.45
         },
         {
@@ -1172,20 +1490,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 23.8,
-          "start_at": 129.763,
+          "start_at": 129.98,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 129.363,
-          "ramp": 0.4
+          "start_at": 129.58,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        129.58,
+        129.81,
+        130.29,
+        130.77,
+        131.27,
+        131.27,
+        131.75,
+        132.24,
+        132.57,
+        132.75,
+        132.75,
+        134.24,
+        134.49,
+        134.75,
+        135,
+        135.28,
+        135.51,
+        135.75,
+        136.17,
+        136.48,
+        136.65
+      ]
     },
     {
       "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
@@ -1218,14 +1563,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 137.977
+          "start_at": 138.3
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 137.977,
-          "fade_out_at": 167.312,
+          "start_at": 138.3,
+          "fade_out_at": 167.65,
           "fade_out": 0.45
         },
         {
@@ -1238,20 +1583,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 25.5,
-          "start_at": 138.377,
+          "start_at": 138.7,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 137.977,
-          "ramp": 0.4
+          "start_at": 138.3,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        138.3,
+        138.98,
+        139.2,
+        139.43,
+        139.67,
+        140.13,
+        140.42,
+        140.59,
+        140.59,
+        142.06,
+        142.31,
+        142.61,
+        142.84,
+        143.1,
+        143.35,
+        143.62,
+        145.5,
+        145.5,
+        147.06,
+        147.49,
+        149.35
+      ]
     },
     {
       "text": "在告别的那地方 我们都无法放下的伤感",
@@ -1282,14 +1654,14 @@
           "gravity": -3,
           "drift": 0,
           "wobble": 0,
-          "start_at": 167.762
+          "start_at": 168.1
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 167.762,
-          "fade_out_at": 175.009,
+          "start_at": 168.1,
+          "fade_out_at": 175.35,
           "fade_out": 0.45
         },
         {
@@ -1302,20 +1674,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 27.2,
-          "start_at": 168.162,
+          "start_at": 168.5,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 167.762,
-          "ramp": 0.4
+          "start_at": 168.1,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        168.1,
+        168.32,
+        168.65,
+        168.97,
+        169.19,
+        169.52,
+        169.86,
+        169.86,
+        170.37,
+        170.83,
+        171.1,
+        171.48,
+        171.79,
+        172.28,
+        172.53,
+        173.72,
+        174.08,
+        174.51
+      ]
     },
     {
       "text": "挥一挥手留下的是美丽愿望",
@@ -1348,14 +1744,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 175.459
+          "start_at": 175.8
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 175.459,
-          "fade_out_at": 182.988,
+          "start_at": 175.8,
+          "fade_out_at": 182.4,
           "fade_out": 0.45
         },
         {
@@ -1368,20 +1764,38 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 28.9,
-          "start_at": 175.859,
+          "start_at": 176.2,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 175.459,
-          "ramp": 0.4
+          "start_at": 175.8,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        175.8,
+        176.05,
+        176.39,
+        176.78,
+        176.99,
+        177.37,
+        177.7,
+        178.14,
+        178.64,
+        178.9,
+        179.31,
+        179.66
+      ]
     },
     {
       "text": "就像是逆风的帆 对海浪不屈的那坚强",
@@ -1412,14 +1826,14 @@
           "gravity": -3,
           "drift": 0,
           "wobble": 0,
-          "start_at": 183.438
+          "start_at": 182.85
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 183.438,
-          "fade_out_at": 190.733,
+          "start_at": 182.85,
+          "fade_out_at": 191.13,
           "fade_out": 0.45
         },
         {
@@ -1432,20 +1846,43 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 30.6,
-          "start_at": 183.838,
+          "start_at": 183.25,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 183.438,
-          "ramp": 0.4
+          "start_at": 182.85,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        182.85,
+        183.84,
+        184.21,
+        184.59,
+        184.86,
+        185.21,
+        185.58,
+        185.58,
+        186.11,
+        186.55,
+        186.82,
+        187.21,
+        187.53,
+        188.01,
+        188.29,
+        189.58,
+        190.16
+      ]
     },
     {
       "text": "天空里早已留下了 永恒的神话",
@@ -1472,7 +1909,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 191.183,
+          "start_at": 191.58,
           "from": 0,
           "ease": "back_out"
         },
@@ -1480,8 +1917,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 191.183,
-          "fade_out_at": 198.164,
+          "start_at": 191.58,
+          "fade_out_at": 198.27,
           "fade_out": 0.45
         },
         {
@@ -1494,20 +1931,40 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 32.3,
-          "start_at": 191.583,
+          "start_at": 191.98,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 191.183,
-          "ramp": 0.4
+          "start_at": 191.58,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        191.58,
+        191.81,
+        192.14,
+        192.55,
+        192.78,
+        193.14,
+        193.45,
+        193.97,
+        193.97,
+        194.47,
+        194.73,
+        195.73,
+        196.17,
+        196.61
+      ]
     },
     {
       "text": "秋天的夜晚 静静地回想 在远方",
@@ -1534,8 +1991,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 198.614,
-          "fade_out_at": 205.831,
+          "start_at": 198.72,
+          "fade_out_at": 206.1,
           "fade_out": 0.45
         },
         {
@@ -1548,20 +2005,41 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 34,
-          "start_at": 199.014,
+          "start_at": 199.12,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 198.614,
-          "ramp": 0.4
+          "start_at": 198.72,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        198.72,
+        198.9,
+        199.1,
+        199.36,
+        199.51,
+        199.51,
+        200.99,
+        201.43,
+        201.95,
+        202.5,
+        203.59,
+        203.59,
+        205.12,
+        205.4,
+        205.65
+      ]
     },
     {
       "text": "挥去不散 我们怀念着的故乡",
@@ -1594,14 +2072,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 206.281
+          "start_at": 206.55
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 206.281,
-          "fade_out_at": 213.741,
+          "start_at": 206.55,
+          "fade_out_at": 213.85,
           "fade_out": 0.45
         },
         {
@@ -1614,20 +2092,39 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 35.7,
-          "start_at": 206.681,
+          "start_at": 206.95,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 206.281,
-          "ramp": 0.4
+          "start_at": 206.55,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        206.55,
+        206.97,
+        207.27,
+        207.41,
+        207.41,
+        209.95,
+        210.17,
+        210.39,
+        210.86,
+        211.09,
+        211.39,
+        211.71,
+        212.05
+      ]
     },
     {
       "text": "穿过云端 是谁的天堂 在召唤",
@@ -1658,14 +2155,14 @@
           "gravity": -3,
           "drift": 0,
           "wobble": 0,
-          "start_at": 214.191
+          "start_at": 214.3
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 214.191,
-          "fade_out_at": 221.525,
+          "start_at": 214.3,
+          "fade_out_at": 221.76,
           "fade_out": 0.45
         },
         {
@@ -1678,20 +2175,40 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 37.4,
-          "start_at": 214.591,
+          "start_at": 214.7,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 214.191,
-          "ramp": 0.4
+          "start_at": 214.3,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        214.3,
+        214.81,
+        215.08,
+        215.26,
+        215.26,
+        216.79,
+        217.2,
+        217.74,
+        218.22,
+        219.18,
+        219.18,
+        220.88,
+        221.12,
+        221.42
+      ]
     },
     {
       "text": "她在寻访 那沉睡千年的答案",
@@ -1718,7 +2235,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 221.975,
+          "start_at": 222.21,
           "from": 0,
           "ease": "back_out"
         },
@@ -1726,8 +2243,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 221.975,
-          "fade_out_at": 228.461,
+          "start_at": 222.21,
+          "fade_out_at": 228.43,
           "fade_out": 0.45
         },
         {
@@ -1740,20 +2257,39 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 39.1,
-          "start_at": 222.375,
+          "start_at": 222.61,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 221.975,
-          "ramp": 0.4
+          "start_at": 222.21,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        222.21,
+        222.67,
+        222.95,
+        223.11,
+        223.11,
+        225.72,
+        225.93,
+        226.17,
+        226.56,
+        226.77,
+        227.04,
+        227.43,
+        227.84
+      ]
     },
     {
       "text": "远离那些繁华悲伤 我们从此告别了过往",
@@ -1780,7 +2316,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 228.911,
+          "start_at": 228.88,
           "from": 0,
           "ease": "back_out"
         },
@@ -1788,8 +2324,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 228.911,
-          "fade_out_at": 236.025,
+          "start_at": 228.88,
+          "fade_out_at": 236.33,
           "fade_out": 0.45
         },
         {
@@ -1802,20 +2338,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 40.8,
-          "start_at": 229.311,
+          "start_at": 229.28,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 228.911,
-          "ramp": 0.4
+          "start_at": 228.88,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        228.88,
+        229.35,
+        229.58,
+        229.83,
+        230.06,
+        230.5,
+        230.76,
+        230.93,
+        230.93,
+        232.53,
+        232.78,
+        233.02,
+        233.29,
+        233.55,
+        233.77,
+        234.03,
+        234.46,
+        234.77
+      ]
     },
     {
       "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
@@ -1848,14 +2408,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 236.475
+          "start_at": 236.78
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 236.475,
-          "fade_out_at": 242.962,
+          "start_at": 236.78,
+          "fade_out_at": 243.2,
           "fade_out": 0.45
         },
         {
@@ -1868,20 +2428,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 42.5,
-          "start_at": 236.875,
+          "start_at": 237.18,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 236.475,
-          "ramp": 0.4
+          "start_at": 236.78,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        236.78,
+        237.16,
+        237.41,
+        237.67,
+        237.92,
+        238.35,
+        238.56,
+        238.76,
+        238.76,
+        240.41,
+        240.63,
+        240.93,
+        241.16,
+        241.43,
+        241.7,
+        241.95,
+        242.28,
+        242.61
+      ]
     },
     {
       "text": "来到她身旁 谁的目光 停留在那个梦里的夜晚",
@@ -1908,8 +2492,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 243.412,
-          "fade_out_at": 251.735,
+          "start_at": 243.65,
+          "fade_out_at": 251.78,
           "fade_out": 0.45
         },
         {
@@ -1922,20 +2506,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 44.2,
-          "start_at": 243.812,
+          "start_at": 244.05,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 243.412,
-          "ramp": 0.4
+          "start_at": 243.65,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        243.65,
+        243.88,
+        244.33,
+        244.84,
+        245.3,
+        245.3,
+        245.75,
+        246.23,
+        246.52,
+        246.69,
+        246.69,
+        248.28,
+        248.51,
+        248.76,
+        249,
+        249.25,
+        249.51,
+        249.75,
+        250.21,
+        250.5,
+        250.68
+      ]
     },
     {
       "text": "我们追随风的方向 遥远飞行地老天荒 别彷徨",
@@ -1968,14 +2579,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 252.185
+          "start_at": 252.23
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 252.185,
-          "fade_out_at": 263.671,
+          "start_at": 252.23,
+          "fade_out_at": 263.84,
           "fade_out": 0.45
         },
         {
@@ -1988,20 +2599,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 45.9,
-          "start_at": 252.585,
+          "start_at": 252.63,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 252.185,
-          "ramp": 0.4
+          "start_at": 252.23,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        252.23,
+        252.92,
+        253.17,
+        253.41,
+        253.66,
+        254.11,
+        254.4,
+        254.57,
+        254.57,
+        256.15,
+        256.38,
+        256.63,
+        256.88,
+        257.11,
+        257.35,
+        257.61,
+        259.45,
+        259.45,
+        261.08,
+        261.57,
+        263.48
+      ]
     },
     {
       "text": "远离那些繁华悲伤 我们从此告别了过往",
@@ -2028,8 +2666,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 264.121,
-          "fade_out_at": 271.407,
+          "start_at": 264.29,
+          "fade_out_at": 271.63,
           "fade_out": 0.45
         },
         {
@@ -2042,20 +2680,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 47.6,
-          "start_at": 264.521,
+          "start_at": 264.69,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 264.121,
-          "ramp": 0.4
+          "start_at": 264.29,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        264.29,
+        264.82,
+        265.03,
+        265.25,
+        265.5,
+        265.91,
+        266.18,
+        266.36,
+        266.36,
+        267.9,
+        268.15,
+        268.4,
+        268.64,
+        268.89,
+        269.12,
+        269.39,
+        269.9,
+        270.17
+      ]
     },
     {
       "text": "飞鸟张开时光翅膀 经历了无数风雨阻挡",
@@ -2082,7 +2744,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 271.857,
+          "start_at": 272.08,
           "from": 0,
           "ease": "back_out"
         },
@@ -2090,8 +2752,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 271.857,
-          "fade_out_at": 278.243,
+          "start_at": 272.08,
+          "fade_out_at": 278.4,
           "fade_out": 0.45
         },
         {
@@ -2104,20 +2766,44 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 49.3,
-          "start_at": 272.257,
+          "start_at": 272.48,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 271.857,
-          "ramp": 0.4
+          "start_at": 272.08,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        272.08,
+        272.53,
+        272.77,
+        273.01,
+        273.26,
+        273.69,
+        273.94,
+        274.13,
+        274.13,
+        275.83,
+        276.04,
+        276.29,
+        276.52,
+        276.77,
+        277.02,
+        277.26,
+        277.61,
+        277.98
+      ]
     },
     {
       "text": "在我们身旁",
@@ -2144,7 +2830,7 @@
           "type": "pop",
           "duration": 0.5,
           "stagger": 0.06,
-          "start_at": 278.693,
+          "start_at": 278.85,
           "from": 0,
           "ease": "back_out"
         },
@@ -2152,8 +2838,8 @@
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 278.693,
-          "fade_out_at": 280.574,
+          "start_at": 278.85,
+          "fade_out_at": 280.77,
           "fade_out": 0.45
         },
         {
@@ -2166,20 +2852,31 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 51,
-          "start_at": 279.093,
+          "start_at": 279.25,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 278.693,
-          "ramp": 0.4
+          "start_at": 278.85,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        278.85,
+        279.08,
+        279.52,
+        280.05,
+        280.56
+      ]
     },
     {
       "text": "她的目光 飞翔在每个梦里的夜晚",
@@ -2212,14 +2909,14 @@
           "duration": 0.7,
           "stagger": 0.06,
           "ease": "ease_out_quad",
-          "start_at": 281.024
+          "start_at": 281.22
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 281.024,
-          "fade_out_at": 287.219,
+          "start_at": 281.22,
+          "fade_out_at": 287.27,
           "fade_out": 0.45
         },
         {
@@ -2232,20 +2929,41 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 52.7,
-          "start_at": 281.424,
+          "start_at": 281.62,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 281.024,
-          "ramp": 0.4
+          "start_at": 281.22,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        281.22,
+        281.69,
+        281.97,
+        282.14,
+        282.14,
+        283.68,
+        283.91,
+        284.15,
+        284.37,
+        284.63,
+        284.87,
+        285.11,
+        285.56,
+        285.8,
+        285.98
+      ]
     },
     {
       "text": "我们追随风的方向 遥远飞行地久天长 不返航",
@@ -2276,13 +2994,13 @@
           "gravity": -3,
           "drift": 0,
           "wobble": 0,
-          "start_at": 287.669
+          "start_at": 287.72
         },
         {
           "type": "fade",
           "duration": 0.3,
           "stagger": 0.04,
-          "start_at": 287.669,
+          "start_at": 287.72,
           "fade_out": 0.45,
           "fade_out_at": 317.4
         },
@@ -2296,20 +3014,47 @@
           "frequency": 3,
           "rotation": 0.01,
           "phase": 54.4,
-          "start_at": 288.069,
+          "start_at": 288.12,
           "stagger": 0,
-          "ramp": 0.5
+          "ramp": 0.5,
+          "hit": true,
+          "hit_duration": 0.55
         },
         {
           "type": "wave",
           "amplitude": 0.09,
           "frequency": 1.6,
           "spacing": 0.55,
-          "start_at": 287.669,
-          "ramp": 0.4
+          "start_at": 287.72,
+          "ramp": 0.4,
+          "hit": true,
+          "hit_duration": 2
         }
       ],
-      "fit_width": 17.75699501992517
+      "fit_width": 17.75699501992517,
+      "char_times": [
+        287.72,
+        288.26,
+        288.48,
+        288.76,
+        289.01,
+        289.43,
+        289.72,
+        289.9,
+        289.9,
+        291.47,
+        291.71,
+        291.98,
+        292.24,
+        292.49,
+        292.73,
+        293.01,
+        294.84,
+        294.84,
+        296.33,
+        296.79,
+        299.04
+      ]
     }
   ],
   "backgrounds": [
@@ -2324,7 +3069,7 @@
       "drift": 1
     },
     {
-      "at": 16.575,
+      "at": 16.54,
       "fade": 2,
       "top": "#060a1e",
       "bottom": "#02030a",
@@ -2334,7 +3079,7 @@
       "drift": 1
     },
     {
-      "at": 24.152,
+      "at": 24.56,
       "fade": 2,
       "top": "#00303a",
       "bottom": "#01121a",
@@ -2344,7 +3089,7 @@
       "drift": 1.1
     },
     {
-      "at": 31.148,
+      "at": 31.4,
       "fade": 2,
       "top": "#050b1c",
       "bottom": "#01040e",
@@ -2354,7 +3099,7 @@
       "drift": 0.7
     },
     {
-      "at": 39.883,
+      "at": 40.07,
       "fade": 2,
       "top": "#10203f",
       "bottom": "#3a2440",
@@ -2364,7 +3109,7 @@
       "drift": 1.2
     },
     {
-      "at": 53.684,
+      "at": 53.92,
       "fade": 2,
       "top": "#2a1030",
       "bottom": "#0d0512",
@@ -2374,7 +3119,7 @@
       "drift": 0.9
     },
     {
-      "at": 61.482,
+      "at": 61.89,
       "fade": 2,
       "top": "#03120c",
       "bottom": "#010604",
@@ -2384,7 +3129,7 @@
       "drift": 0.7
     },
     {
-      "at": 69.356,
+      "at": 69.67,
       "fade": 2,
       "top": "#2a1400",
       "bottom": "#100600",
@@ -2394,7 +3139,7 @@
       "drift": 1
     },
     {
-      "at": 77.246,
+      "at": 77.66,
       "fade": 2,
       "top": "#0a0330",
       "bottom": "#04011a",
@@ -2404,7 +3149,7 @@
       "drift": 1.3
     },
     {
-      "at": 84.347,
+      "at": 84.12,
       "fade": 2,
       "top": "#2a0a12",
       "bottom": "#120306",
@@ -2414,7 +3159,7 @@
       "drift": 0.9
     },
     {
-      "at": 92.069,
+      "at": 92.56,
       "fade": 2,
       "top": "#02142e",
       "bottom": "#010a1a",
@@ -2424,7 +3169,7 @@
       "drift": 1.4
     },
     {
-      "at": 100.077,
+      "at": 100.17,
       "fade": 2,
       "top": "#0d1630",
       "bottom": "#05070f",
@@ -2434,7 +3179,7 @@
       "drift": 1.1
     },
     {
-      "at": 107.945,
+      "at": 108.3,
       "fade": 2,
       "top": "#04101f",
       "bottom": "#01060e",
@@ -2444,7 +3189,7 @@
       "drift": 0.6
     },
     {
-      "at": 114.718,
+      "at": 114.63,
       "fade": 2,
       "top": "#0d2410",
       "bottom": "#04100a",
@@ -2454,7 +3199,7 @@
       "drift": 1.2
     },
     {
-      "at": 122.419,
+      "at": 122.53,
       "fade": 2,
       "top": "#0a0f1e",
       "bottom": "#03050c",
@@ -2464,7 +3209,7 @@
       "drift": 1.6
     },
     {
-      "at": 129.363,
+      "at": 129.58,
       "fade": 2,
       "top": "#0b1a2e",
       "bottom": "#030814",
@@ -2474,7 +3219,7 @@
       "drift": 0.8
     },
     {
-      "at": 137.977,
+      "at": 138.3,
       "fade": 2,
       "top": "#050226",
       "bottom": "#01010c",
@@ -2484,7 +3229,7 @@
       "drift": 1.8
     },
     {
-      "at": 167.762,
+      "at": 168.1,
       "fade": 2,
       "top": "#241202",
       "bottom": "#0d0601",
@@ -2494,7 +3239,7 @@
       "drift": 0.8
     },
     {
-      "at": 175.459,
+      "at": 175.8,
       "fade": 2,
       "top": "#1c1a10",
       "bottom": "#0a0906",
@@ -2504,7 +3249,7 @@
       "drift": 0.7
     },
     {
-      "at": 183.438,
+      "at": 182.85,
       "fade": 2,
       "top": "#021a34",
       "bottom": "#01081a",
@@ -2514,7 +3259,7 @@
       "drift": 1.5
     },
     {
-      "at": 191.183,
+      "at": 191.58,
       "fade": 2,
       "top": "#20061e",
       "bottom": "#0a020a",
@@ -2524,7 +3269,7 @@
       "drift": 2
     },
     {
-      "at": 198.614,
+      "at": 198.72,
       "fade": 2,
       "top": "#03071a",
       "bottom": "#01030c",
@@ -2534,7 +3279,7 @@
       "drift": 0.6
     },
     {
-      "at": 206.281,
+      "at": 206.55,
       "fade": 2,
       "top": "#141820",
       "bottom": "#080a10",
@@ -2544,7 +3289,7 @@
       "drift": 0.5
     },
     {
-      "at": 214.191,
+      "at": 214.3,
       "fade": 2,
       "top": "#2a1c04",
       "bottom": "#120a01",
@@ -2554,7 +3299,7 @@
       "drift": 1.1
     },
     {
-      "at": 221.975,
+      "at": 222.21,
       "fade": 2,
       "top": "#070422",
       "bottom": "#020212",
@@ -2564,7 +3309,7 @@
       "drift": 0.9
     },
     {
-      "at": 228.911,
+      "at": 228.88,
       "fade": 2,
       "top": "#0a1a2c",
       "bottom": "#04091a",
@@ -2574,7 +3319,7 @@
       "drift": 1.4
     },
     {
-      "at": 236.475,
+      "at": 236.78,
       "fade": 2,
       "top": "#00333a",
       "bottom": "#12003a",
@@ -2584,7 +3329,7 @@
       "drift": 1.3
     },
     {
-      "at": 243.412,
+      "at": 243.65,
       "fade": 2,
       "top": "#0a1020",
       "bottom": "#04060e",
@@ -2594,7 +3339,7 @@
       "drift": 0.7
     },
     {
-      "at": 252.185,
+      "at": 252.23,
       "fade": 2,
       "top": "#010418",
       "bottom": "#00010a",
@@ -2604,7 +3349,7 @@
       "drift": 1
     },
     {
-      "at": 264.121,
+      "at": 264.29,
       "fade": 2,
       "top": "#000000",
       "bottom": "#000000",
@@ -2614,7 +3359,7 @@
       "drift": 0.4
     },
     {
-      "at": 271.857,
+      "at": 272.08,
       "fade": 2,
       "top": "#120820",
       "bottom": "#06030c",
@@ -2624,7 +3369,7 @@
       "drift": 1
     },
     {
-      "at": 278.693,
+      "at": 278.85,
       "fade": 2,
       "top": "#241000",
       "bottom": "#0d0500",
@@ -2634,7 +3379,7 @@
       "drift": 0.6
     },
     {
-      "at": 281.024,
+      "at": 281.22,
       "fade": 2,
       "top": "#22063a",
       "bottom": "#0d021a",
@@ -2644,7 +3389,7 @@
       "drift": 1.2
     },
     {
-      "at": 287.669,
+      "at": 287.72,
       "fade": 2,
       "top": "#1a1a2e",
       "bottom": "#0e0e1a",

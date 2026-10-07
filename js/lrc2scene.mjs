@@ -53,9 +53,15 @@ const USAGE = `chamina lrc → scene
       --jitter <amp>     idle wobble on every line, world units (default off)
       --jitter-rot <rad> rotational part of the wobble (default 0)
       --jitter-freq <hz> wobble rate (default 5)
+      --jitter-hit       gate the wobble on the lyrics: shudder as the line
+                         lands, then hold still (default off = always on)
+      --jitter-hit-dur <sec>  how long one shudder rings (default 0.55)
       --wave <amp>       karaoke bounce travelling across each line (default off)
       --wave-freq <hz>   bounce rate (default 1.6)
       --wave-spacing <r> phase gap per character (default 0.55)
+      --wave-hit         gate the bounce: one ripple crosses the line as it
+                         lands, then the line freezes (default off)
+      --wave-hit-dur <sec>  how long the ripple travels (default 2.0)
       --dolly <u>        ease the camera radius to this distance (default off)
       --crane <rad>      ease the orbit elevation to this angle (default off)
       --move-at <sec>    when the camera move starts (default 12% of scene)
@@ -63,6 +69,9 @@ const USAGE = `chamina lrc → scene
       --shake <amp>      hand-held camera shake, world units (default off)
       --shake-roll <rad> roll wobble in radians (default 0.008)
       --shake-freq <hz>  shake rate (default 3.5)
+      --shake-hit        gate the shake on the lyrics: dead still between
+                         lines, one kick per cue (default off = always on)
+      --shake-hit-dur <sec>  how long each kick rings (default 0.55)
       --fit-width <u>    world-space width budget per line; default 0.85 of
                          the frame width the camera can see, 0 disables
       --offset <sec>     shift every cue (added on top of the LRC offset tag)
@@ -123,9 +132,13 @@ function parseArgs(argv) {
     jitter: null,
     jitterRot: 0,
     jitterFreq: 5,
+    jitterHit: false,
+    jitterHitDur: 0.55,
     wave: null,
     waveFreq: 1.6,
     waveSpacing: 0.55,
+    waveHit: false,
+    waveHitDur: 2.0,
     dolly: null,
     crane: null,
     moveAt: null,
@@ -133,6 +146,8 @@ function parseArgs(argv) {
     shake: null,
     shakeRoll: 0.008,
     shakeFreq: 3.5,
+    shakeHit: false,
+    shakeHitDur: 0.55,
     fitWidth: null,
     offset: 0,
     fadeIn: 0.3,
@@ -182,19 +197,25 @@ function parseArgs(argv) {
       case '--outline-width': o.outlineWidth = Number(next()); break;
       case '--bloom': o.bloom = Number(next()); break;
       case '--entrance': o.entrance = next(); break;
-      case '--jitter': o.jitter = Number(next()); break;
-      case '--jitter-rot': o.jitterRot = Number(next()); break;
-      case '--jitter-freq': o.jitterFreq = Number(next()); break;
-      case '--wave': o.wave = Number(next()); break;
-      case '--wave-freq': o.waveFreq = Number(next()); break;
-      case '--wave-spacing': o.waveSpacing = Number(next()); break;
+    case '--jitter': o.jitter = Number(next()); break;
+    case '--jitter-rot': o.jitterRot = Number(next()); break;
+    case '--jitter-freq': o.jitterFreq = Number(next()); break;
+    case '--jitter-hit': o.jitterHit = true; break;
+    case '--jitter-hit-dur': o.jitterHitDur = Number(next()); break;
+    case '--wave': o.wave = Number(next()); break;
+    case '--wave-freq': o.waveFreq = Number(next()); break;
+    case '--wave-spacing': o.waveSpacing = Number(next()); break;
+    case '--wave-hit': o.waveHit = true; break;
+    case '--wave-hit-dur': o.waveHitDur = Number(next()); break;
       case '--dolly': o.dolly = Number(next()); break;
       case '--crane': o.crane = Number(next()); break;
       case '--move-at': o.moveAt = Number(next()); break;
       case '--move-dur': o.moveDur = Number(next()); break;
-      case '--shake': o.shake = Number(next()); break;
-      case '--shake-roll': o.shakeRoll = Number(next()); break;
-      case '--shake-freq': o.shakeFreq = Number(next()); break;
+    case '--shake': o.shake = Number(next()); break;
+    case '--shake-roll': o.shakeRoll = Number(next()); break;
+    case '--shake-freq': o.shakeFreq = Number(next()); break;
+    case '--shake-hit': o.shakeHit = true; break;
+    case '--shake-hit-dur': o.shakeHitDur = Number(next()); break;
       case '--fit-width': o.fitWidth = Number(next()); break;
       case '--offset': o.offset = Number(next()); break;
       case '--fade-in': o.fadeIn = Number(next()); break;
@@ -367,17 +388,21 @@ function applyCameraMotion(anim, duration, args) {
   }
 
   if (Number.isFinite(args.shake) && args.shake > 0) {
-    out = {
-      ...out,
-      shake: {
-        amplitude: args.shake,
-        frequency: Number.isFinite(args.shakeFreq) ? args.shakeFreq : 3.5,
-        roll: Number.isFinite(args.shakeRoll) ? args.shakeRoll : 0.008,
-        at: 0,
-        until: null,
-        ramp: 0.8,
-      },
+    const shake = {
+      amplitude: args.shake,
+      frequency: Number.isFinite(args.shakeFreq) ? args.shakeFreq : 3.5,
+      roll: Number.isFinite(args.shakeRoll) ? args.shakeRoll : 0.008,
+      at: 0,
+      until: null,
+      ramp: 0.8,
     };
+    // Only written when asked for, so scenes without the flag stay
+    // byte-identical.
+    if (args.shakeHit) {
+      shake.hit = true;
+      shake.hit_duration = Number.isFinite(args.shakeHitDur) ? args.shakeHitDur : 0.55;
+    }
+    out = { ...out, shake };
   }
   return out;
 }
@@ -398,6 +423,8 @@ function main() {
     // Per-line `{e:fall}` overrides — without this the tag would be parsed and
     // then silently thrown away here.
     if (l.tags) out.tags = l.tags;
+    // Same trap for word timing: per-glyph stamps move with `--offset`.
+    if (l.charTimes) out.charTimes = l.charTimes.map((v) => v + (args.offset || 0));
     return out;
   });
   if (!lines.length) throw new Error(`no timestamped lines in ${lrcPath}`);
@@ -426,10 +453,22 @@ function main() {
     total: duration,
     fitWidth: fitWidth,
     jitter: Number.isFinite(args.jitter) && args.jitter > 0
-      ? { amplitude: args.jitter, rotation: args.jitterRot, frequency: args.jitterFreq }
+      ? {
+          amplitude: args.jitter,
+          rotation: args.jitterRot,
+          frequency: args.jitterFreq,
+          hit: !!args.jitterHit,
+          hit_duration: args.jitterHitDur,
+        }
       : null,
     wave: Number.isFinite(args.wave) && args.wave > 0
-      ? { amplitude: args.wave, frequency: args.waveFreq, spacing: args.waveSpacing }
+      ? {
+          amplitude: args.wave,
+          frequency: args.waveFreq,
+          spacing: args.waveSpacing,
+          hit: !!args.waveHit,
+          hit_duration: args.waveHitDur,
+        }
       : null,
   });
 
