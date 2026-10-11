@@ -9,6 +9,7 @@ import {
   buildLyricTexts,
   buildTitleBlock,
 } from './lrc.js';
+import { evalAll } from './anim.mjs';
 
 const SRC = `[ti:鸟之诗]
 [ar:HANA]
@@ -67,6 +68,39 @@ test('the entrance layer and the fade share one start_at', () => {
     assert.ok(t.animations.some((a) => a.type === 'slide'));
     assert.ok(t.animations.some((a) => a.type === 'fade'));
   }
+});
+
+test('overshoot lands past its rest pose in both position and scale', () => {
+  const texts = buildLyricTexts([{ time: 5, text: 'AB' }], { entrance: 'overshoot', size: 1.7 });
+  const anims = texts[0].animations;
+  assert.ok(anims.some((a) => a.type === 'slide' && a.ease === 'back_out'));
+  assert.ok(anims.some((a) => a.type === 'pop' && a.ease === 'back_out'));
+
+  // Sample the entrance: it starts short of the rest pose, flies past it in
+  // both axes, then settles exactly back.
+  const at = (t) => evalAll(anims, t, 0, 1.7, null);
+  const start = at(5);
+  assert.ok(start.offset[0] < 0, 'slide must start away from the rest pose');
+  assert.ok(start.scale < 1, 'pop must start below full size');
+
+  let peak = null;
+  for (let k = 1; k <= 200 && !peak; k++) {
+    const st = at(5 + k * 0.005);
+    if (st.offset[0] > 0 && st.scale > 1) peak = st;
+  }
+  assert.ok(peak, 'both displacement and scale must overshoot the rest pose');
+
+  const rest = at(8);
+  assert.ok(Math.abs(rest.offset[0]) < 1e-9, 'displacement must settle at 0');
+  assert.ok(Math.abs(rest.scale - 1) < 1e-9, 'scale must settle at 1');
+});
+
+test('the overshoot tag is accepted per line', () => {
+  const texts = buildLyricTexts([{ time: 1, text: 'X', tags: { e: 'overshoot' } }], {
+    entrance: 'fall',
+  });
+  assert.ok(texts[0].animations.some((a) => a.type === 'pop' && a.ease === 'back_out'));
+  assert.ok(texts[0].animations.some((a) => a.type === 'slide' && a.ease === 'back_out'));
 });
 
 test('a blank line is skipped rather than emitted empty', () => {

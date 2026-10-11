@@ -11,7 +11,10 @@ const META_RE = /^\[([A-Za-z_][\w#-]*):(.*)\]\s*$/;
 //   [00:16.575]{e:fall}远离那些繁华悲伤 …
 // Braces are never valid LRC lyric content, so the two syntaxes cannot clash.
 const TAG_RE = /^\{([A-Za-z_][\w-]*)\s*[:=]\s*([^{}]*)\}/;
-const ENTRANCES = ['none', 'slide', 'fall', 'pop'];
+// `overshoot` is `slide` + `pop` run together with an easing that passes 1.0:
+// the line flies in from the lower-left *and* punches in from zero size, both
+// landing past their rest pose and settling back. That reads as impact.
+const ENTRANCES = ['none', 'slide', 'fall', 'pop', 'overshoot'];
 
 /**
  * Strip leading `{key:value}` overrides off a lyric line.
@@ -266,6 +269,28 @@ export function buildLyricTexts(lines, opts = {}) {
         from: 0,
         ease: 'back_out',
       });
+    } else if (entrance === 'overshoot') {
+      // Two layers on purpose: `slide` contributes position, `pop` scale, and
+      // evalAll adds offsets while multiplying scale, so they compose into one
+      // entrance. `back_out` overshoots, so each lands past its rest pose.
+      animations.unshift(
+        {
+          type: 'slide',
+          delta: [-7, -3, 0],
+          duration: 0.75,
+          stagger: stagger * 1.5,
+          ease: 'back_out',
+          start_at: t,
+        },
+        {
+          type: 'pop',
+          duration: 0.6,
+          stagger: stagger * 1.5,
+          start_at: t,
+          from: 0,
+          ease: 'back_out',
+        },
+      );
     }
 
     const jit = buildJitter(opts.jitter, i, t);

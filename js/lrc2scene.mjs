@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseLrc, applyOffset, suggestDuration, buildLyricTexts, buildTitleBlock, visibleWidth } from './lrc.js';
+import { layoutField } from './layout.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -47,9 +48,16 @@ const USAGE = `chamina lrc → scene
       --bloom <n>        bloom intensity (default 0.06)
                          the gift-card preset uses 0.3, which floods the
                          gaps between strokes of a whole lyric line
-      --entrance <mode>  none | slide | fall | pop (default slide)
+      --entrance <mode>  none | slide | fall | pop | overshoot (default slide)
                    a line may override it with a leading tag, e.g.
                    [00:16.575]{e:fall}远离那些繁华悲伤 …
+                   overshoot = slide + pop with an easing that passes 1.0, so
+                   the line lands past its rest pose and punches back in
+      --layout <mode>    single | field (default single)
+                   single = one centred slot, every line fades before the next
+                   lands. field = lay the song out as a serpentine path through
+                   the world, give every cue its own camera stop, and keep each
+                   line on screen until the camera has carried it out of frame.
       --jitter <amp>     idle wobble on every line, world units (default off)
       --jitter-rot <rad> rotational part of the wobble (default 0)
       --jitter-freq <hz> wobble rate (default 5)
@@ -129,6 +137,7 @@ function parseArgs(argv) {
     outlineWidth: 0.02,
     bloom: 0.06,
     entrance: 'slide',
+    layout: 'single',
     jitter: null,
     jitterRot: 0,
     jitterFreq: 5,
@@ -197,6 +206,7 @@ function parseArgs(argv) {
       case '--outline-width': o.outlineWidth = Number(next()); break;
       case '--bloom': o.bloom = Number(next()); break;
       case '--entrance': o.entrance = next(); break;
+      case '--layout': o.layout = next(); break;
     case '--jitter': o.jitter = Number(next()); break;
     case '--jitter-rot': o.jitterRot = Number(next()); break;
     case '--jitter-freq': o.jitterFreq = Number(next()); break;
@@ -413,6 +423,9 @@ function main() {
     console.log(USAGE);
     process.exit(args.help ? 0 : 1);
   }
+  if (args.layout !== 'single' && args.layout !== 'field') {
+    throw new Error(`--layout must be single or field (got "${args.layout}")`);
+  }
 
   const lrcPath = resolve(args.input);
   const parsed = parseLrc(fs.readFileSync(lrcPath, 'utf8'));
@@ -440,7 +453,46 @@ function main() {
   // line outward beyond its advance width.
   const fitWidth = args.fitWidth ?? visibleWidth({ ...template, camera_animation: cameraAnimation }) * 0.85;
 
-  const texts = buildLyricTexts(lines, {
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  // Card times, derived before the layout runs because the camera path has to
+  // know how long the opening card holds the frame and when the outro takes it.
+  const outroAt =
+    Number.isFinite(args.outroAt) && args.outroAt > 0 ? args.outroAt : null;
+  const outroOut =
+    Number.isFinite(args.outroOut) && args.outroOut > 0
+      ? args.outroOut
+      : Math.max((outroAt ?? 0) + 3, duration - 1.5);
+  const firstCue = lines.length ? lines[0].time : duration;
+  const titleOut =
+    Number.isFinite(args.titleOut) && args.titleOut >= 0
+      ? args.titleOut
+      : Math.max(args.titleIn + 2, firstCue - 1.2);
+
+  // Only lines that actually render take part in the layout.
+  const lyricLines = lines.filter((l) => l.text);
+  let layout = null;
+  if (args.layout === 'field') {
+    layout = layoutField(lyricLines, {
+      camera: cameraAnimation,
+      duration,
+      fov: Number(template.camera?.fov) || 0.8726646,
+      aspect: (template.width || 1920) / (template.height || 1080),
+      // Same clamping buildLyricTexts applies, so the frame budget is computed
+      // against the size the glyphs really get.
+      size: Number.isFinite(Number(args.size))
+        ? Math.min(12, Math.max(0.2, Number(args.size)))
+        : 1.5,
+      fitWidth,
+      fadeIn: Number.isFinite(Number(args.fadeIn))
+        ? Math.min(10, Math.max(0, Number(args.fadeIn)))
+        : 0.3,
+      outroAt,
+      titleOut,
+    });
+    cameraAnimation.stops = layout.stops;
+  }
+
+  const texts = buildLyricTexts(lyricLines, {
     size: args.size,
     y: args.y,
     depth: args.depth,
@@ -472,6 +524,17 @@ function main() {
       : null,
   });
 
+  if (layout) {
+    // The blocks are all in the single slot buildLyricTexts put them in; the
+    // layout owns their world position and the moment each one has left frame.
+    for (let i = 0; i < texts.length; i++) {
+      texts[i].position = layout.positions[i];
+      const fade = texts[i].animations.find((a) => a.type === 'fade');
+      const exit = layout.exits[i];
+      if (Number.isFinite(exit)) fade.fade_out_at = exit;
+    }
+  }
+
   if (args.outline) {
     for (const t of texts) {
       t.material.outline = {
@@ -491,13 +554,6 @@ function main() {
   // Outro card. The last cue lands far before the track ends, so `keep-open`
   // would pin one line on screen for the whole instrumental tail; hand the
   // frame over to a closing card instead.
-  const r3 = (x) => Math.round(x * 1000) / 1000;
-  const outroAt =
-    Number.isFinite(args.outroAt) && args.outroAt > 0 ? args.outroAt : null;
-  const outroOut =
-    Number.isFinite(args.outroOut) && args.outroOut > 0
-      ? args.outroOut
-      : Math.max((outroAt ?? 0) + 3, duration - 1.5);
   if (outroAt !== null) {
     const fade = texts[texts.length - 1].animations.find((a) => a.type === 'fade');
     const handOff = r3(Math.max(fade.start_at + 2, outroAt - 0.6));
@@ -507,14 +563,10 @@ function main() {
     }
   }
 
-  // Opening card: the track can start well before the first timed line, and a
-  // bare particle field for that long reads as a stall. Default the fade-out
-  // to just before the first cue so the card is gone before any lyric lands.
-  const firstCue = lines.length ? lines[0].time : duration;
-  const titleOut =
-    Number.isFinite(args.titleOut) && args.titleOut >= 0
-      ? args.titleOut
-      : Math.max(args.titleIn + 2, firstCue - 1.2);
+  // Opening card. The track can start well before the first timed line, and a
+  // bare particle field for that long reads as a stall; `titleOut` above already
+  // defaults to just before the first cue so the card is gone before any lyric
+  // lands.
   const titleSize = clamp(args.titleSize, 0.2, 12, 3);
   const cardCommon = {
     color: args.color,

@@ -7,15 +7,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  cameraBasis,
   charDelay,
   evalAll,
   evalAnim,
   evalBackgrounds,
+  evalOrbit,
   hexToRgb,
   hitEnvelope,
   hitWeight,
   jitterNoise,
   IDENTITY_Q,
+  orbitEye,
+  projectNDC,
   shakeEnvelope,
   shakeWeight,
 } from './anim.mjs';
@@ -452,4 +456,109 @@ test('evalAll threads the word timing through every layer', () => {
   assert.ok(Math.abs(evalAll(anims, 10.5, 1, 1, times).scale) < 1e-9);
   assert.equal(evalAll(anims, 10.5, 1, 1).alpha, 1, 'the grid still wins without stamps');
   assert.ok(evalAll(anims, 10.5, 1, 1).scale > 0);
+});
+
+// ---------------------------------------------------------------------------
+// orbit camera rig
+// ---------------------------------------------------------------------------
+
+const FOV = 0.8726646;
+const ASPECT = 16 / 9;
+
+function baseOrbit(extra) {
+  return { type: 'orbit', radius: 14, elevation: 0.09, target: [0, 1, 0], start_yaw: 0, speed: 0, ...extra };
+}
+
+test('a bare orbit is returned untouched and its yaw just drifts', () => {
+  const o = baseOrbit();
+  const s = evalOrbit(o, 0);
+  assert.equal(s.radius, 14);
+  assert.equal(s.elevation, 0.09);
+  assert.deepEqual(s.target, [0, 1, 0]);
+  assert.equal(s.yaw, 0);
+  assert.equal(evalOrbit(o, 12.5).yaw, 0, 'speed 0 holds the heading');
+  assert.equal(evalOrbit(baseOrbit({ speed: 0.02 }), 10).yaw, 0.2);
+});
+
+test('the single movement layer still eases radius and elevation', () => {
+  const o = baseOrbit({
+    movement: { radius_end: 12.6, elevation_end: 0.16, at: 45, duration: 30, ease: 'linear' },
+  });
+  assert.equal(evalOrbit(o, 10).radius, 14, 'before the move begins');
+  assert.equal(evalOrbit(o, 45).radius, 14, 'the move opens at its start time');
+  assert.equal(evalOrbit(o, 60).radius, 13.3, 'halfway through, linearly');
+  assert.ok(Math.abs(evalOrbit(o, 75).radius - 12.6) < 1e-9, 'and lands on the end value');
+});
+
+test('a target-only stop trucks the camera and leaves the dolly alone', () => {
+  const o = baseOrbit({
+    movement: { radius_end: 12.6, elevation_end: 0.16, at: 0, duration: 360, ease: 'linear' },
+    stops: [{ at: 10, duration: 5, target: [20, -3, 0], ease: 'ease_in_out_cubic' }],
+  });
+  const before = evalOrbit(o, 9.99);
+  assert.deepEqual(before.target, [0, 1, 0], 'the rig has not moved yet');
+  const settled = evalOrbit(o, 15);
+  assert.deepEqual(settled.target, [20, -3, 0], 'and has arrived after the stop');
+  const baseAt15 = evalOrbit({ ...o, stops: undefined }, 15);
+  assert.ok(Math.abs(settled.radius - baseAt15.radius) < 1e-9, 'radius follows the movement, not the stop');
+  assert.ok(Math.abs(settled.elevation - baseAt15.elevation) < 1e-9, 'and so does the crane');
+});
+
+test('each stop eases from where the previous one landed', () => {
+  const o = baseOrbit({
+    stops: [
+      { at: 10, duration: 4, target: [10, 1, 0], ease: 'linear' },
+      { at: 20, duration: 4, target: [10, 9, 0], ease: 'linear' },
+    ],
+  });
+  assert.deepEqual(evalOrbit(o, 14).target, [10, 1, 0], 'stop one settles');
+  assert.deepEqual(evalOrbit(o, 20).target, [10, 1, 0], 'stop two starts from stop one');
+  assert.deepEqual(evalOrbit(o, 22).target, [10, 5, 0], 'not from the original framing');
+  assert.deepEqual(evalOrbit(o, 30).target, [10, 9, 0]);
+});
+
+test('the basis is unit length, orthogonal, and looks at the target', () => {
+  const s = evalOrbit(baseOrbit(), 0);
+  const b = cameraBasis(s);
+  const norm = (v) => Math.hypot(v[0], v[1], v[2]);
+  const dot = (a, b2) => a[0] * b2[0] + a[1] * b2[1] + a[2] * b2[2];
+  assert.ok(Math.abs(norm(b.forward) - 1) < 1e-9);
+  assert.ok(Math.abs(norm(b.right) - 1) < 1e-9);
+  assert.ok(Math.abs(norm(b.up) - 1) < 1e-9);
+  assert.ok(Math.abs(dot(b.forward, b.right)) < 1e-9);
+  assert.ok(Math.abs(dot(b.forward, b.up)) < 1e-9);
+  assert.ok(Math.abs(dot(b.right, b.up)) < 1e-9);
+  const toTarget = [s.target[0] - b.eye[0], s.target[1] - b.eye[1], s.target[2] - b.eye[2]];
+  assert.ok(Math.abs(dot(toTarget, b.forward) - norm(toTarget)) < 1e-9, 'forward points at the target');
+  const eye = orbitEye(s);
+  assert.ok(Math.abs(Math.hypot(eye[0] - s.target[0], eye[1] - s.target[1], eye[2] - s.target[2]) - 14) < 1e-9);
+});
+
+test('the target projects to frame centre and the frame edge lands on halfFrame', () => {
+  const s = evalOrbit(baseOrbit(), 0);
+  const b = cameraBasis(s);
+  const centre = projectNDC(b, s.target, FOV, ASPECT);
+  assert.ok(Math.abs(centre[0]) < 1e-9 && Math.abs(centre[1]) < 1e-9);
+  assert.ok(Math.abs(centre[2] - 14) < 1e-9, 'the target sits exactly one radius deep');
+  // Half the visible width, worked out the same way `visibleWidth` does it.
+  const halfFrame = Math.tan(FOV / 2) * ASPECT * 14;
+  assert.ok(Math.abs(halfFrame - 11.6) < 0.05, 'matches the 0.828 * radius rule of thumb');
+  const atDepth = (r, u) => [
+    b.eye[0] + b.forward[0] * 14 + b.right[0] * r + b.up[0] * u,
+    b.eye[1] + b.forward[1] * 14 + b.right[1] * r + b.up[1] * u,
+    b.eye[2] + b.forward[2] * 14 + b.right[2] * r + b.up[2] * u,
+  ];
+  const edge = projectNDC(b, atDepth(halfFrame, 0), FOV, ASPECT);
+  assert.ok(Math.abs(edge[0] - 1) < 1e-9, 'that distance is exactly the right hand edge');
+  const above = projectNDC(b, atDepth(0, Math.tan(FOV / 2) * 14), FOV, ASPECT);
+  assert.ok(Math.abs(above[1] - 1) < 1e-9, 'and the vertical half height works the same way');
+  assert.ok(projectNDC(b, atDepth(halfFrame * 2, 0), FOV, ASPECT)[0] > 1, 'twice that is off frame to the right');
+  assert.ok(projectNDC(b, atDepth(0, -Math.tan(FOV / 2) * 14 * 3), FOV, ASPECT)[1] < -1, 'three half heights below is off the bottom');
+});
+
+test('points behind the eye do not project', () => {
+  const s = evalOrbit(baseOrbit(), 0);
+  const b = cameraBasis(s);
+  const back = [b.eye[0] - b.forward[0] * 5, b.eye[1] - b.forward[1] * 5, b.eye[2] - b.forward[2] * 5];
+  assert.equal(projectNDC(b, back, FOV, ASPECT), null);
 });

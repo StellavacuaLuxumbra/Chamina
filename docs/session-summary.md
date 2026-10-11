@@ -753,3 +753,101 @@ node js/render.js --data target/chamina/scene_data.json --probe cues
    排版一拉开就得改由文字 bbox 推导（`js/scene.js:295`）。
 
 
+
+## 八、空间排版 + 逐句运镜 —— v7 第 2 步
+
+### 8.1 三条共用通路（都是纯函数）
+
+- `js/anim.mjs` 导出 `evalOrbit / orbitEye / cameraBasis / projectNDC / lerp`：
+  轨道 → movement → stops 顺序求值（遇到 `t < at` 的 stop 就 break）。
+  `scene.js::updateCamera` 改为直接调它 —— **画出来的构图 = 判定出画的构图**，
+  否则 `fade_out_at` 是拿另一套几何算的，会骗人。
+- Rust `CameraStop { at, duration, ease, target, radius, elevation }` +
+  `OrbitCam.stops`（`stops` 空则整个字段跳过序列化 → 没有 `--layout` 就字节不变）。
+  只有 `Option` 轴会跳过，`ease` 永远在（snake_case → `ease_in_out_cubic`）。
+- `js/layout.mjs::layoutField(lines, opts)` 一次算出 `{positions, exits, stops}`。
+
+### 8.2 排版算法
+
+- 行宽模型：`em = 中文*1.0 + 空格*0.2959`，非中文非空格也按 1 em（保守），
+  `width = min(em * size, fitWidth)` —— 与 Rust `total_width_em` 实测 **33/33 对上**
+  （空格实测 **0.2959** 不是 0.30；`TextExport` 有 `total_width_em` + `size`，没有 `fit_width`）。
+- 蛇形网格 `GRID = { cols: 5, xStep: 30, yStep: 15 }`（x∈±60，y∈[0,90]）：
+  行 0 从中间列起 → 落在世界原点，**开题卡的构图一帧都不动**。
+  步长必须大于「行半宽 + 画面半宽」（≈4 + 11.6 = 15.6），否则上一句还留在画里。
+- 7 个 `STAGES` 预设（rAdd/sx/sy/el）轮转。槽位**故意做小**：槽位的语义是
+  「把注视点从邻句推开」，`sy` 一大上一句就多赖 2~3 句在画里。
+- **`fitScale` 保持 0.85，不加 `--layout-fit`**：横向多样完全靠逐句 dolly-out 买，
+  `rmax = 16` → `rHi = 16.6`，半宽 10.99 vs 行半宽 8.88（约 1.24 倍余量），
+  近景仍然是满尺寸的那句。
+- 出画扫描：从 `max(cue + fadeIn + 0.15, 最后一字 + 0.15)` 起每 0.1 s 调 `boxOnFrame`
+  （四角任一在相机后 → 算在画里；否则 AABB 与 `[-1,1]²` 相交），取**第一个离画时刻**
+  写进 `fade_out_at`；整条都对不上 → 留 null（由 outro / `--keep-open` 决定）。
+- 收尾：`outroAt - 12` 回到 `evalOrbit(rig, tail).target` 的开场构图，正好落在 318。
+
+### 8.3 修正 1：stops 不许互相踩（长间隙）
+
+`start = cue - d`，`d = max(1.2, min(gap*0.45, 14, gap-0.4))`。`138.3 → 168.1` 这段
+**29.8 s** 的长间隙会把 stop_i 拉到上一句 cue **之前**才启动。
+→ `start = max(start, cues[i-1] + 0.8)`（i=0 用 `titleOut`），再 `min(start, cue - 0.4)`。
+
+### 8.4 修正 2：空屏时长 ≈ 飞行时长的一半（本步最大的发现）
+
+上一句大约在飞行的 **50%** 处彻底出画（步长 30 vs 可视半径 15.6），而下一句要等 rig
+在 cue 上落定才亮 → **空屏 ≈ 0.49 × 飞行时长**。飞行时长原本随间隙涨到 13.4 s，
+于是长间隙空 **8.3 s**、全程空 **31 s**（`t=250` 静帧是纯空镜，一个字都没有）。
+→ 新增导出常量 `TRAVEL_MAX = 2.0`：任何一句的飞行最多 2 s。
+单次空屏降到 **≤ 1.74 s（均值 0.72 s）**，长间隙也只剩 ~1 s，
+而且「慢慢飘过去」变成「甩过去 + 落定」，更贴「力量感」。
+
+网格再小虽然空屏更短，但判据立刻炸：`x27/y14 → mx=3、over=3`，
+`x20/y12 → mx=3、over=18`（三句同框）。所以 `xStep=30` 是下限不是偏好。
+
+### 8.5 粒子云跟随（部分跟随）
+
+云的 `x∈±35 / y∈[-25,45]` 是硬编码的，排版一排到 `x=±60` 就整片出画。
+→ `state.particles.position = 0.75 * (rig.target - orbit.target)`。
+`N = 2600` 不变、单句模式恒为 `(0,0,0)`（字节不变），留 25% 视差当纵深。
+
+**坑**：必须用**施加 shake 之前**的 `rig.target` —— shake 同时位移眼睛和注视点，
+世界已经在屏幕上摆过一遍了，再平移一次等于叠两遍。
+
+### 8.6 ⚠ 踩到的坑
+
+1. **`const tx` + shake**：第 2a 步重构把 `let tx = o.target[0]` 换成
+   `const tx = rig.target[0]`，可 shake 分支里还留着 `tx += ox` →
+   **每个命中帧都抛 `Assignment to constant variable`**。`--probe cues` 的采样点
+   恰好落在 envelope 之外所以一路绿灯，直到 `--still 16.6`（正打在 cue 上）才炸。
+   → 验 shake 必须挑**命中窗口内**的静帧，probe 绿灯不等于 shake 没坏。
+2. **sweep 脚本自己把 fit 乘了两次**（`BASE_FIT = 17.757` 本身已是 ×0.85 的结果，
+   又乘了一遍 `fitScale`）→ 整轮参数扫描是在「行宽再小 15%」的前提下做的，
+   扫出来的 `x27/y14` 一到真实行宽就 `mx=3`。**判据里用的量必须是最终量。**
+3. `--probe` 只数「不透明度 > 0 的字」，不管在不在画里：`visible=19` 也可能是
+   整行都在画外。**看静帧才算数。**
+
+### 8.7 验证（全过）
+
+- `node --test js/layout.test.mjs js/lrc.test.mjs js/anim.test.mjs` → **78 pass / 0 fail**。
+  layout 13 条：em 宽度、蛇形连续/跨度、stops 落点、开题卡不被重框、落定后仍留 15% 边距、
+  构图确实有变化、出画晚于逐字完成、不拖堂、**空屏 ≤ TRAVEL_MAX**、≤2 句同框、收尾回位、空输入、预设数。
+- `cargo test` **32 + 1 doc-test**、`cargo clippy --all-targets` 0 警告、`cargo fmt --check` 干净。
+- **字节回归**：把 `--layout field` 去掉重跑 8.8 的命令 →
+  `7965A1510D46ABCCEF0D62B8DC5E6A5FE56225A5EBFFB8952F0F62E64EDDFF06`，与改动前逐字节一致 ✓。
+- 带 `--layout field`：34 个 stop / 33 个 position / 33 个 `fade_out_at`，
+  `chamina-render --dry-run` 之后 Rust 往返**逐项 0 处不一致**（`meta.camera_animation.stops` 34/34 相等）。
+- `render.js --probe cues` → **37/37**；再拿 33 个 `cue + 0.05`（命中窗口内）跑一遍 → 无报错（即 8.6-1 的坑）。
+- 静帧抽查：t=19 首句逐字 + 构图偏左、t=55 句在左下、**t=166 长间隙里上一句始终在画**、
+  t=249 上一句还在、t=251.5 空屏（0.7 s 的换句呼吸）、
+  t=250 极端位 (x=-54, y=77) 粒子仍铺满整幅。
+
+### 8.8 复现（v7 第 2 步）
+
+在 7.5 的 `$a` 里插入 `'--layout','field'` 即可
+（`--layout single | field`，默认 `single`；USAGE 另有 `--entrance … overshoot`）。
+生成后照 7.5 继续 `cargo build` → `--dry-run` → `--probe cues`。
+
+### 8.9 下一步
+
+1. 把 `scenes/bird.lrc` 里标 `{e:pop}` / `{e:slide}` 的行改标 `{e:overshoot}`
+   （`{e:fall}` / `{e:none}` 保留），目标分布约 22 / 5 / 6。
+2. 出一版片看节奏 —— 静帧看不出甩镜速度，`TRAVEL_MAX = 2.0` 是否够劲要靠看的。

@@ -194,7 +194,7 @@ fn build_meta(scene: &Scene) -> Meta {
         bloom: scene.bloom,
         dof: scene.dof,
         camera: scene.camera,
-        camera_animation: scene.camera_animation,
+        camera_animation: scene.camera_animation.clone(),
         lights: scene.lights,
         seed: scene.seed,
         work_dir: scene.work_dir.to_string_lossy().into_owned(),

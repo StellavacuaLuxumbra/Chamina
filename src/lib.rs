@@ -43,8 +43,8 @@ pub mod prelude {
     pub use crate::material::{Glass, Material, Metal, Neon, Outline};
     pub use crate::math::{Quat, Vec2, Vec3};
     pub use crate::scene::{
-        BackgroundKey, BloomConfig, CameraAnim, CameraConfig, CameraMove, CameraShake, DofConfig,
-        FxConfig, LightSetup, OrbitCam, Scene, TextSpec,
+        BackgroundKey, BloomConfig, CameraAnim, CameraConfig, CameraMove, CameraShake, CameraStop,
+        DofConfig, FxConfig, LightSetup, OrbitCam, Scene, TextSpec,
     };
     pub use crate::ChaminaError;
     pub use crate::Result;

@@ -160,8 +160,8 @@ impl Default for CameraConfig {
 /// is optional, so a move can be "just push in" or "push in while craning
 /// down and drifting the look-at point".
 ///
-/// The move is evaluated by the JS renderer (`js/scene.js::updateCamera`);
-/// Rust only carries the description.
+/// The move is evaluated by the JS renderer (`js/anim.mjs::evalOrbit`); Rust
+/// only carries the description.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CameraMove {
@@ -214,6 +214,67 @@ impl CameraMove {
 
     pub fn target_end(mut self, t: impl Into<Vec3>) -> Self {
         self.target_end = Some(t.into());
+        self
+    }
+}
+
+/// One framing in a sequence of per-line camera stops.
+///
+/// Where [`CameraMove`] is a single long move layered on top of the orbit, a
+/// stop is an **absolute** framing the rig eases toward, starting from wherever
+/// the previous stop left it. Stops only name the axes they actually change: a
+/// stop with just a `target` is a pure truck and leaves the dolly / crane from
+/// `movement` running underneath it, which is how the lyric layout keeps its
+/// global push-in while re-aiming at each line in turn.
+///
+/// Stops are evaluated by the JS renderer (`js/anim.mjs::evalOrbit`); Rust only
+/// carries the description and is what keeps the field alive across the
+/// scene.json -> scene_data.json round trip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CameraStop {
+    /// Absolute time (s) this stop starts easing in.
+    pub at: f32,
+    /// Seconds spent easing from the previous framing to this one.
+    pub duration: f32,
+    pub ease: Ease,
+    /// Look-at point; `None` keeps the one the rig already had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Vec3>,
+    /// Orbit radius; `None` keeps following `movement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    /// Elevation (radians); `None` keeps following `movement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevation: Option<f32>,
+}
+
+impl Default for CameraStop {
+    fn default() -> Self {
+        Self {
+            at: 0.0,
+            duration: 3.0,
+            ease: Ease::EaseInOutCubic,
+            target: None,
+            radius: None,
+            elevation: None,
+        }
+    }
+}
+
+impl CameraStop {
+    /// Aim the rig at `target`, leaving radius and elevation to `movement`.
+    pub fn target(at: f32, duration: f32, t: impl Into<Vec3>) -> Self {
+        Self {
+            at,
+            duration,
+            target: Some(t.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn ease(mut self, e: Ease) -> Self {
+        self.ease = e;
         self
     }
 }
@@ -331,7 +392,9 @@ impl CameraShake {
 }
 
 /// Whole-scene camera animation (applied to the single camera).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Copy`: the stop sequence is a `Vec`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OrbitCam {
     /// Radius of the orbit circle around `target`, in world units.
@@ -348,6 +411,10 @@ pub struct OrbitCam {
     pub movement: Option<CameraMove>,
     /// Optional hand-held shake.
     pub shake: Option<CameraShake>,
+    /// Per-cue framings, eases in sequence once their `at` passes; empty for
+    /// the single-look-at rig the rest of the pipeline assumes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<CameraStop>,
 }
 
 impl Default for OrbitCam {
@@ -360,6 +427,7 @@ impl Default for OrbitCam {
             target: Vec3::ZERO,
             movement: None,
             shake: None,
+            stops: Vec::new(),
         }
     }
 }
@@ -374,9 +442,14 @@ impl OrbitCam {
         self.shake = Some(s);
         self
     }
+
+    pub fn stop(mut self, s: CameraStop) -> Self {
+        self.stops.push(s);
+        self
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CameraAnim {
     Orbit(OrbitCam),
@@ -901,8 +974,74 @@ mod tests {
                 assert_eq!(o.radius, 14.0);
                 assert!(o.movement.is_none(), "missing key must default to None");
                 assert!(o.shake.is_none(), "missing key must default to None");
+                assert!(o.stops.is_empty(), "missing key must default to no stops");
             }
         }
+    }
+
+    #[test]
+    fn camera_stops_round_trip_and_stay_out_of_legacy_json() {
+        // A scene written before stops existed must not grow the key, or every
+        // existing export changes for no reason.
+        let plain = serde_json::to_string(&CameraAnim::default()).unwrap();
+        assert!(
+            !plain.contains("stops"),
+            "empty stop list is omitted: {plain}"
+        );
+
+        let cam = CameraAnim::Orbit(
+            OrbitCam::default()
+                .movement(CameraMove::dolly(0.0, 360.0, 12.6))
+                .stop(CameraStop::target(16.54, 3.0, [6.0, -1.2, 0.0]))
+                .stop(CameraStop::target(23.5, 3.0, [-6.0, 0.4, 0.0]).ease(Ease::BackOut)),
+        );
+        let json = serde_json::to_string(&cam).unwrap();
+        assert!(
+            json.contains("\"stops\""),
+            "written when there are stops: {json}"
+        );
+
+        let back: CameraAnim = serde_json::from_str(&json).unwrap();
+        match back {
+            CameraAnim::Orbit(o) => {
+                assert_eq!(o.stops.len(), 2, "both stops survive the trip");
+                let s = &o.stops[0];
+                assert!((s.at - 16.54).abs() < 1e-6);
+                assert!((s.duration - 3.0).abs() < 1e-6);
+                assert_eq!(s.target, Some([6.0, -1.2, 0.0].into()));
+                assert!(s.radius.is_none(), "an unset axis stays unset");
+                assert!(s.elevation.is_none());
+                assert_eq!(s.ease, Ease::EaseInOutCubic, "and eases by default");
+                assert_eq!(o.stops[1].ease, Ease::BackOut);
+
+                // A target-only stop must not drag the dolly along with it: the
+                // radius / elevation keys stay absent so the renderer keeps
+                // following `movement` for those axes.
+                let stop_json = serde_json::to_string(&o.stops[0]).unwrap();
+                assert!(
+                    !stop_json.contains("radius"),
+                    "unset axis omitted: {stop_json}"
+                );
+                assert!(
+                    !stop_json.contains("elevation"),
+                    "unset axis omitted: {stop_json}"
+                );
+
+                let m = o.movement.expect("movement still reads alongside stops");
+                assert_eq!(m.radius_end, Some(12.6));
+            }
+        }
+    }
+
+    #[test]
+    fn a_target_only_stop_keeps_the_dolly_running() {
+        // The contract the layout generator leans on: naming only `target` in
+        // a stop must leave radius / elevation to the single long move.
+        let stop = CameraStop::target(10.0, 4.0, [3.0, 0.0, 0.0]);
+        assert_eq!(stop.target, Some([3.0, 0.0, 0.0].into()));
+        assert!(stop.radius.is_none());
+        assert!(stop.elevation.is_none());
+        assert!((stop.duration - 4.0).abs() < 1e-6);
     }
 
     #[test]

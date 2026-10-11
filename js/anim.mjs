@@ -341,3 +341,138 @@ export function shakeWeight(s, t, cues) {
   if (env <= 0) return 0;
   return s.hit ? env * hitEnvelope(cues, t, s.hit_duration ?? 0.55) : env;
 }
+
+// ---------------------------------------------------------------------------
+// orbit camera (mirrors scene.js::updateCamera's rig, minus shake + punch)
+// ---------------------------------------------------------------------------
+
+const lerp = (a, b, k) => a + (b - a) * k;
+
+/**
+ * Camera rig state at time `t`: `radius`, `elevation`, `target` and `yaw`.
+ *
+ * Three layers, in order:
+ *  1. the orbit's own radius / elevation / target,
+ *  2. the single eased `movement` (dolly / crane / pan) on top of those,
+ *  3. `stops` — a sequence of **absolute** framings, each eased in from the
+ *     previous one. A stop may name only the fields it changes; the rest keep
+ *     flowing from layers 1-2, so a stop list that only moves `target` is a
+ *     pure truck and leaves the dolly/crane untouched.
+ *
+ * Shake and the cue punch are deliberately *not* here: they are per-frame
+ * noise the renderer adds afterwards, and the off-frame maths only cares about
+ * where the rig is looking.
+ */
+export function evalOrbit(o, t) {
+  let radius = o.radius;
+  let elevation = o.elevation;
+  let tx = o.target[0];
+  let ty = o.target[1];
+  let tz = o.target[2];
+
+  const m = o.movement;
+  if (m) {
+    const k = easeApply(m.ease ?? 'ease_in_out_cubic', (t - (m.at ?? 0)) / Math.max(m.duration ?? 1, 1e-6));
+    if (m.radius_end !== null && m.radius_end !== undefined) radius = lerp(radius, m.radius_end, k);
+    if (m.elevation_end !== null && m.elevation_end !== undefined) {
+      elevation = lerp(elevation, m.elevation_end, k);
+    }
+    if (m.target_end) {
+      tx = lerp(tx, m.target_end[0], k);
+      ty = lerp(ty, m.target_end[1], k);
+      tz = lerp(tz, m.target_end[2], k);
+    }
+  }
+
+  const stops = o.stops;
+  if (stops && stops.length) {
+    // `from*` is where the previous stop (or layer 2, for the first one) left
+    // the rig; each stop eases toward its own absolute framing and then hands
+    // that on as the next start.
+    let fr = radius;
+    let fe = elevation;
+    let ftx = tx;
+    let fty = ty;
+    let ftz = tz;
+    for (const s of stops) {
+      const at = s.at ?? 0;
+      if (t < at) break;
+      const k = easeApply(s.ease ?? 'ease_in_out_cubic', (t - at) / Math.max(s.duration ?? 1, 1e-6));
+      const tr = s.radius ?? fr;
+      const te = s.elevation ?? fe;
+      const ttx = s.target ? s.target[0] : ftx;
+      const tty = s.target ? s.target[1] : fty;
+      const ttz = s.target ? s.target[2] : ftz;
+      radius = lerp(fr, tr, k);
+      elevation = lerp(fe, te, k);
+      tx = lerp(ftx, ttx, k);
+      ty = lerp(fty, tty, k);
+      tz = lerp(ftz, ttz, k);
+      fr = tr;
+      fe = te;
+      ftx = ttx;
+      fty = tty;
+      ftz = ttz;
+    }
+  }
+
+  return { radius, elevation, target: [tx, ty, tz], yaw: o.start_yaw + o.speed * t };
+}
+
+/** World position of the eye for an orbit state. */
+export function orbitEye(s) {
+  const ce = Math.cos(s.elevation);
+  const se = Math.sin(s.elevation);
+  return [
+    s.target[0] + s.radius * ce * Math.cos(s.yaw),
+    s.target[1] + s.radius * se,
+    s.target[2] + s.radius * ce * Math.sin(s.yaw),
+  ];
+}
+
+/**
+ * Orthonormal camera basis: eye plus the forward / right / up axes a pinhole
+ * projection needs. Built the way `Object3D.lookAt` builds it (world up is
+ * +Y), so the numbers match what the renderer actually draws.
+ */
+export function cameraBasis(s) {
+  const eye = orbitEye(s);
+  const t = s.target;
+  let fx = t[0] - eye[0];
+  let fy = t[1] - eye[1];
+  let fz = t[2] - eye[2];
+  const fl = Math.hypot(fx, fy, fz) || 1;
+  fx /= fl;
+  fy /= fl;
+  fz /= fl;
+  // right = normalize(cross(forward, worldUp)); cross((x,y,z),(0,1,0)) = (-z,0,x)
+  let rx = -fz;
+  let ry = 0;
+  let rz = fx;
+  const rl = Math.hypot(rx, ry, rz) || 1;
+  rx /= rl;
+  ry /= rl;
+  rz /= rl;
+  // up' = cross(right, forward)
+  const ux = ry * fz - rz * fy;
+  const uy = rz * fx - rx * fz;
+  const uz = rx * fy - ry * fx;
+  return { eye, forward: [fx, fy, fz], right: [rx, ry, rz], up: [ux, uy, uz] };
+}
+
+/**
+ * Normalised device coordinates of `p`, or `null` when it sits behind the eye.
+ * `x`/`y` are in [-1, 1] across the frame, matching the WebGL clip volume, so
+ * "off frame" is simply `|x| > 1 || |y| > 1`.
+ */
+export function projectNDC(basis, p, fov, aspect) {
+  const vx = p[0] - basis.eye[0];
+  const vy = p[1] - basis.eye[1];
+  const vz = p[2] - basis.eye[2];
+  const zc = vx * basis.forward[0] + vy * basis.forward[1] + vz * basis.forward[2];
+  if (zc <= 1e-6) return null;
+  const xc = vx * basis.right[0] + vy * basis.right[1] + vz * basis.right[2];
+  const yc = vx * basis.up[0] + vy * basis.up[1] + vz * basis.up[2];
+  const th = Math.tan(fov / 2);
+  return [(xc / zc) / (th * aspect), (yc / zc) / th, zc];
+}

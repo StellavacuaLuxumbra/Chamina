@@ -17,7 +17,14 @@ import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 // ./anim.mjs so node can test it without a browser; this file only wires the
 // results onto Three.js objects.
 
-import { easeApply, evalAll, evalBackgrounds, hitEnvelope, jitterNoise, shakeWeight } from './anim.mjs';
+import {
+  evalAll,
+  evalBackgrounds,
+  evalOrbit,
+  hitEnvelope,
+  jitterNoise,
+  shakeWeight,
+} from './anim.mjs';
 
 // Debug flags (set through `render.js --url "a=1&b=1"`):
 //   debug      all of the below at once (head-on camera, no post, no particles)
@@ -64,6 +71,7 @@ const state = {
   composer: null,
   chars: [],
   particleUniforms: null,
+  particles: null,
   orbit: null,
   width: 0,
   height: 0,
@@ -371,6 +379,7 @@ function buildParticles(meta) {
   points.frustumCulled = false;
   state.scene.add(points);
   state.particleUniforms = uniforms;
+  state.particles = points;
 }
 
 /**
@@ -605,38 +614,35 @@ function updateCamera(t) {
   state.lastHit = hit;
   if (!o) return;
 
-  let radius = o.radius;
-  let elevation = o.elevation;
-  let tx = o.target[0];
-  let ty = o.target[1];
-  let tz = o.target[2];
-
-  // Eased push / crane / pan layered on top of the orbit.
-  const m = o.movement;
-  if (m) {
-    const k = easeApply(
-      m.ease ?? 'ease_in_out_cubic',
-      (t - (m.at ?? 0)) / Math.max(m.duration ?? 1, 1e-6),
+  // Orbit, the eased push/crane/pan and any per-cue stops all resolve through
+  // one shared pure rig (`evalOrbit`), so the off-frame maths that decides when
+  // a line has left the picture works from exactly the framing drawn here.
+  const rig = evalOrbit(o, t);
+  const yaw = rig.yaw;
+  // The cloud is authored around the world origin, which is where the default
+  // rig looks. When stops walk the camera across a lyric field the cloud has
+  // to come along or a wide shot would find bare sky — but only part of the
+  // way, so the drift between particles and camera still reads as depth. The
+  // rig target is used before the shake displaces it, because the shake moves
+  // eye and look-at together and the world already swings on screen for free.
+  // With no stops this is exactly zero and the cloud sits exactly where it
+  // always has.
+  if (state.particles) {
+    const base = o.target || [0, 0, 0];
+    state.particles.position.set(
+      (rig.target[0] - base[0]) * 0.75,
+      (rig.target[1] - base[1]) * 0.75,
+      (rig.target[2] - base[2]) * 0.75,
     );
-    if (m.radius_end !== null && m.radius_end !== undefined) {
-      radius += (m.radius_end - radius) * k;
-    }
-    if (m.elevation_end !== null && m.elevation_end !== undefined) {
-      elevation += (m.elevation_end - elevation) * k;
-    }
-    if (m.target_end) {
-      tx += (m.target_end[0] - tx) * k;
-      ty += (m.target_end[1] - ty) * k;
-      tz += (m.target_end[2] - tz) * k;
-    }
   }
-
-  const yaw = o.start_yaw + o.speed * t;
-  const ce = Math.cos(elevation);
-  const se = Math.sin(elevation);
-  let px = tx + radius * ce * Math.cos(yaw);
-  let py = ty + radius * se;
-  let pz = tz + radius * ce * Math.sin(yaw);
+  let tx = rig.target[0];
+  let ty = rig.target[1];
+  let tz = rig.target[2];
+  const ce = Math.cos(rig.elevation);
+  const se = Math.sin(rig.elevation);
+  let px = tx + rig.radius * ce * Math.cos(yaw);
+  let py = ty + rig.radius * se;
+  let pz = tz + rig.radius * ce * Math.sin(yaw);
 
   let roll = 0;
   const s = o.shake;
