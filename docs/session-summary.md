@@ -851,3 +851,96 @@ node js/render.js --data target/chamina/scene_data.json --probe cues
 1. 把 `scenes/bird.lrc` 里标 `{e:pop}` / `{e:slide}` 的行改标 `{e:overshoot}`
    （`{e:fall}` / `{e:none}` 保留），目标分布约 22 / 5 / 6。
 2. 出一版片看节奏 —— 静帧看不出甩镜速度，`TRAVEL_MAX = 2.0` 是否够劲要靠看的。
+
+
+## 九、逐词运镜（per-word choreography）—— v7 第 3 步
+
+### 9.1 通路：词组切分 + 每组一段运镜
+
+- 新 flag `--groups off|auto`（默认 `off`）。`off` = 第 2 步行为**逐字节不变**。
+- `js/lrc.js` 新增 `wordGroups(text, charTimes, seed)`：先在空格处断句，
+  再用 `PHRASE_CUTS`（15 种切法）按 `(seed*5 + phraseIndex*3) % 15` 给每句选节奏。
+  返回半开区间 `[{i0,i1,t,kind}]`，`t` = 该组**首字**的戳。
+- `groupCharTimes`：把整组字压到首字的戳上 → 全词同拍落地，
+  且**只会提前不会推迟**，所以原来的 fade-out 判据依旧安全。
+- `buildLyricTexts` 在 `groups==='auto'` 时用 `groupCharTimes` 压 `char_times`；
+  `layoutField` 用同一份 `wordGroups`（同一个 seed = lyricIndex）算运镜，
+  两边必然一致。
+
+### 9.2 运镜模型（`js/layout.mjs`）
+
+- `MOVES` 12 种：`down/up/right/left`、`downR/downL/upR/upL`、`push/pull`（dR）、
+  `crane/tilt`（dE）。**名字说的是相机做什么**：`right` = 相机右移 = 文字左移。
+- `rollMove`：kind / mag / ease / `lead`（>0 相机先到，<0 相机迟到）/ `pace`。
+- 每句 = 飞行 stop（在 cue 落定）+ 可选 **kick**（踩在 cue 上）+ 每个词组间隙一段 move。
+- **时序硬约束**：`at = max(at, lastEnd + 0.02)`，且 `at + dur ≤ 飞行到下一句的起点`
+  （末句用 `outroAt - 12`）。间隙紧的句子自动少给几段 → 疏密天然不同。
+- 每段落点都用 `projectNDC` 直接验框，放不下就 `scale *= 0.5` 重试 6 次，仍不行就丢弃
+  （丢弃只让这句少动一下，不会破构图）。
+- **反重复**：`signatureOf` = `kick>between,between…`，`assignChoreo` 撞了就换 salt 重掷，
+  直到 33 个签名互不相同（测试断言）。
+
+### 9.3 手写开场（`OPENING_PREFIX` + `PHRASE_CUT_OVERRIDES`）
+
+用户点名的开场节奏：**远**（相机掉得比字还快）→ **离** → 相机 ease-in-out 右滑，
+同时 **那些繁华悲伤** 整块落地。
+
+- `PHRASE_CUT_OVERRIDES`：`0:0 → PHRASE_CUTS[3]`（`[1,1,rest]`），
+  否则公式给第 0 行第 0 句选到 `[n]`（整句一坨）。
+- `0:1 → PHRASE_CUTS[12]`（`[2,2,rest]`）：公式会把第二句也切成同样的 `[1,1,rest]`，
+  **一行里重复自己的节奏**读起来像同一句话说了两遍。
+- `OPENING_PREFIX = { kick: down, between: [up, right(ease_in_out_cubic)] }`，
+  前三拍手写、之后照常掷 —— 注意是 **prefix** 而非整行覆盖：
+  一开始写成「整行覆盖 + `k === between.length+1` 守卫」，
+  而 `PHRASE_CUT_OVERRIDES` 改完 group 数后守卫再也不成立 →
+  **手写开场被静默跳过**，第 0 行拿到随机滚动。签名测试照过（随机签名也唯一），
+  是拆 stop 的 `ease`/`target` 才发现对不上。
+
+### 9.4 规模与验证（全过）
+
+- **177 个 stop**（34 飞行/收尾 + 143 运镜），重叠 **0**，句内 move 数 min 1 / max 7 / 均值 4.3。
+- 33 个签名**全部互异**；ease 四种分布 76/33/32/36。
+- radius 12.60→16.60、elevation 0.000→0.371、target |x|≤63.3 / |y|≤93.1。
+- 空屏：`groups=off` 最长 0.90 s、`auto` 最长 0.97 s，均 ≤ `TRAVEL_MAX`；同框峰值 off=2 / auto=1。
+- Rust 往返：**177/177 stop 逐项 0 处不一致**，`char_times` 33/33 0 处不一致。
+- **字节回归**：去掉 `--layout field --groups auto` 重跑 →
+  `7965A1510D46ABCCEF0D62B8DC5E6A5FE56225A5EBFFB8952F0F62E64EDDFF06`，与改动前逐字节一致 ✓。
+- `node --test js/layout.test.mjs js/lrc.test.mjs js/anim.test.mjs` → **87 pass / 0 fail**。
+  新增 8 条：词组不跨空格且铺满全行、组时间 = 首字戳、33 签名唯一、
+  停靠严格不重叠、句内每段都还在框里、运镜不撞下一段飞行、开场三拍时序、
+  （分组版）空屏/同框/出画晚于逐字完成。
+- `cargo test` 32+1、clippy 0 警告、`fmt --check` 干净、`--probe cues` 37/37、
+  `editor-check` 无 page error、542 glyph。
+
+### 9.5 ⚠ 踩到的坑
+
+1. **判据必须用渲染真正用的时间**。`wordGroups` 的组时间是首字戳，
+   `groupCharTimes` 又把整组压到首字戳 → 逐字戳**不再是**渲染用的值。
+   拿原始 `charTimes` 去比 `fade_out_at`，会报出 4 处「出画早于逐字完成」的**假阳性**。
+   → 比较前先 `groupCharTimes(...)`。
+2. **手写覆盖会被下游的结构性改动静默失效**（9.3 那条守卫）。
+   「按签名唯一」这类测试对随机签名同样成立，**抓不到「手写段落根本没生效」**——
+   必须拆具体 stop 的 `ease`/`target` 才看得出来。
+3. `--probe cues` 只验「cue 上有字」，**不验分组、不验运镜形状**；
+   分组/运镜要另写 probe 拆 stop 才能核对。
+4. **PowerShell 5.1 的 `Add-Content -Value @'…'@` 默认 ANSI/GBK**，
+   中文全写成 mojibake（U+FFFD 1458 个）。
+   → 追加中文长文必须走 UTF-8 通道（`Write` 工具写临时文件 + `node` 拼接，或 `Out-File -Encoding utf8`），
+   写完用 `Buffer.from(s,'utf8').equals(b)` 自检。
+
+### 9.6 复现（v7 第 3 步）
+
+在 7.5 的 `$a` 里插入 `'--layout','field','--groups','auto'` 即可
+（`--groups off | auto`，默认 `off`）。生成后照 7.5 继续
+`cargo build` → `--dry-run` → `--probe cues`。
+
+### 9.7 成片
+
+- 分段渲染 `--from 0/3000/6000/9000/12000/15000/18000/21000`（各 3000 帧，末段 1020），
+  端口 8800–8807，**顺序**跑（6 核 15 GB 并发会 0xC000013A）。
+  实测 3.0–3.6 fps，单段 14–16 min，全程约 2 h。
+- `ffmpeg -f concat -safe 0 -i concat.txt -c copy video.mp4`（concat.txt 路径相对于
+  `target/chamina/`，用裸文件名）→ `node js/mux-audio.mjs video.mp4 鸟之诗.mp3 -o out/鸟之诗-v7.mp4`。
+- 成片 **`out/鸟之诗-v7.mp4`**：00:06:07.00 / 1920×1080 / 60 fps / h264+aac，197 MB。
+- 收尾留白：末句 309.54 出画 → 318 落回开场构图 + outro 卡，**8.5 s**，
+  与 `groups=off` 的 8.4 s 一致（第 2 步就是这样，不是本步引入的）。

@@ -21,6 +21,7 @@
 // flags, so regenerating from the same command reproduces the layout exactly.
 
 import { evalOrbit, cameraBasis, projectNDC } from './anim.mjs';
+import { wordGroups } from './lrc.js';
 
 // Advance of a space in the font Rust lays out with. Measured against
 // `total_width_em` on all 33 exported lines of scenes/bird.lrc to 4 decimals.
@@ -127,6 +128,135 @@ export function gridPositions(n, grid = GRID) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// per-word camera choreography
+// ---------------------------------------------------------------------------
+
+/**
+ * The vocabulary of a move, in normalised half-frames along the screen basis
+ * (`dR` dolly in/out in world units, `dE` tilt in radians). A move is named
+ * after what the *camera* does: `right` slides the camera right, which carries
+ * the line left across the frame.
+ */
+const MOVES = {
+  down: { dx: 0, dy: -1 },
+  up: { dx: 0, dy: 1 },
+  right: { dx: 1, dy: 0 },
+  left: { dx: -1, dy: 0 },
+  downR: { dx: 0.72, dy: -0.72 },
+  downL: { dx: -0.72, dy: -0.72 },
+  upR: { dx: 0.72, dy: 0.72 },
+  upL: { dx: -0.72, dy: 0.72 },
+  push: { dR: -1 },
+  pull: { dR: 1 },
+  crane: { dE: 1 },
+  tilt: { dE: -1 },
+};
+const MOVE_NAMES = Object.keys(MOVES);
+const EASE_NAMES = ['ease_in_out_cubic', 'ease_out_quad', 'ease_in_quad', 'smooth'];
+
+function rng(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The opening line, written by hand. The first three beats of the song are the
+ * whole pitch, so they are not left to the table: 远 drops into frame while the
+ * camera falls faster than the glyph does, 离 gets a short settle, and then the
+ * camera slides right on ease-in-out while 那些繁华悲伤 lands as one block.
+ * The rest of the line falls back to the roll like everybody else.
+ */
+const OPENING_PREFIX = {
+  kick: { kind: 'down', mag: 0.34, ease: 'ease_out_quad', lead: -0.12, pace: 0.85 },
+  between: [
+    { kind: 'up', mag: 0.13, ease: 'smooth', lead: 0.1, pace: 0.6 },
+    { kind: 'right', mag: 0.31, ease: 'ease_in_out_cubic', lead: 0.14, pace: 0.8 },
+  ],
+};
+
+/** Roll one move: which axis, how far, which ease, and whether it leads. */
+function rollMove(r, kind) {
+  const k = kind || MOVE_NAMES[Math.floor(r() * MOVE_NAMES.length)];
+  const spec = MOVES[k];
+  const mag =
+    spec.dR !== undefined ? 0.9 + r() * 1.7 : spec.dE !== undefined ? 0.05 + r() * 0.09 : 0.14 + r() * 0.26;
+  return {
+    kind: k,
+    mag,
+    ease: EASE_NAMES[Math.floor(r() * EASE_NAMES.length)],
+    // > 0 the camera settles before the word lands, < 0 it trails it.
+    lead: -0.16 + r() * 0.42,
+    // Fraction of the gap to the next beat the move is allowed to spend.
+    pace: 0.5 + r() * 0.35,
+  };
+}
+
+/**
+ * One line's phrase: an optional kick on the beat itself, then one move per
+ * gap between word groups. `groups` is the number of groups the line cuts to —
+ * a short line therefore gets a short phrase, which is also what keeps a tight
+ * gap from spilling into the flight that follows it.
+ */
+function rollChoreo(groups, seed) {
+  const r = rng(seed);
+  const kick = r() < 0.72 ? rollMove(r) : null;
+  const between = [];
+  for (let j = 1; j < groups; j++) between.push(rollMove(r));
+  return { kick, between };
+}
+
+export function signatureOf(ch) {
+  return `${ch.kick ? ch.kick.kind : '-'}>${ch.between.map((m) => m.kind).join(',')}`;
+}
+
+/**
+ * Give every line its own phrase. Signatures are unique by construction: a
+ * collision re-rolls that line with a new salt until the phrase is one nobody
+ * else uses. Repetition is the one thing a lyric video cannot afford.
+ *
+ * Line 0 keeps the written opening in front of its roll, so the first three
+ * beats never drift and the tail after them still earns its own signature.
+ */
+export function assignChoreo(groupCounts) {
+  const used = new Set();
+  return groupCounts.map((k, i) => {
+    const prefix = i === 0 ? OPENING_PREFIX : null;
+    const need = Math.max(0, k - 1);
+    const kept = prefix ? Math.min(prefix.between.length, need) : 0;
+    for (let salt = 0; salt < 80; salt++) {
+      const r = rng(i * 7919 + salt * 104729 + 17);
+      const kick = prefix ? prefix.kick : r() < 0.72 ? rollMove(r) : null;
+      const between = prefix ? prefix.between.slice(0, kept) : [];
+      for (let j = kept; j < need; j++) between.push(rollMove(r));
+      const ch = { kick, between };
+      const sig = signatureOf(ch);
+      if (!used.has(sig)) {
+        used.add(sig);
+        return ch;
+      }
+    }
+    return rollChoreo(k, i + 1);
+  });
+}
+
+/** Does the line still fit the frame from this framing? */
+function framingFits(P, target, radius, elevation, yaw, hw, hh, th, aspect, fov) {
+  const basis = cameraBasis({ radius, elevation, target, yaw });
+  const p = projectNDC(basis, P, fov, aspect);
+  if (!p) return false;
+  const fw = th * aspect * radius;
+  const fh = th * radius;
+  // 10% of the frame is kept back for the outline rim and the bloom bleed.
+  return Math.abs(p[0]) + hw / fw <= 0.9 && Math.abs(p[1]) + hh / fh <= 0.92;
+}
+
 /** Is the axis-aligned box around `P` (half extents `hw`/`hh`) on screen? */
 function boxOnFrame(state, P, hw, hh, fov, aspect) {
   const basis = cameraBasis(state);
@@ -186,6 +316,7 @@ export function layoutField(lines, opts = {}) {
     stages = STAGES,
     step = 0.1,
     rmax = 16,
+    groups = 'off',
   } = opts;
 
   const n = lines.length;
@@ -229,9 +360,18 @@ export function layoutField(lines, opts = {}) {
     revealEnd[i] = ct && ct.length ? Math.max(...ct) : cues[i];
   }
 
-  // ---- one stop per line, easing in and settling exactly on the cue --------
-  const starts = [];
-  const durs = [];
+  // ---- return to the title framing before the outro -----------------------
+  const tail = Number.isFinite(outroAt) ? outroAt : duration;
+  const lastCue = cues[n - 1];
+  let backAt = tail - 12;
+  if (backAt < lastCue + 0.6) backAt = lastCue + 0.6;
+  const backDur = tail - backAt;
+
+  // ---- flights in, one per line -------------------------------------------
+  // Computed first: a line's own phrase may never run into the flight that
+  // carries the camera away to the next one.
+  const flightAt = [];
+  const flightDur = [];
   for (let i = 0; i < n; i++) {
     const next = i + 1 < n ? cues[i + 1] : duration;
     const gap = Math.max(next - cues[i], 0.2);
@@ -250,11 +390,31 @@ export function layoutField(lines, opts = {}) {
     if (i === 0 && Number.isFinite(titleOut)) start = Math.max(start, titleOut);
     else if (i > 0) start = Math.max(start, cues[i - 1] + 0.8);
     start = Math.min(start, cues[i] - 0.4);
-    starts[i] = start;
-    durs[i] = Math.max(cues[i] - start, 0.4);
+    flightAt[i] = start;
+    flightDur[i] = Math.max(cues[i] - start, 0.4);
+  }
+
+  // ---- per-word choreography ----------------------------------------------
+  // With `groups: 'auto'` every line is cut into words that land together, and
+  // each gap between them gets its own camera move. Off, and a line is one
+  // stop exactly as before.
+  const groupLists =
+    groups === 'auto'
+      ? lines.map((l, i) =>
+          wordGroups(l.text, l.charTimes, i) || [{ i0: 0, i1: 1, t: cues[i], kind: -1 }],
+        )
+      : null;
+  const choreo = groupLists ? assignChoreo(groupLists.map((g) => g.length)) : null;
+  if (groupLists) {
+    // The last glyph of a line now lands with its group, so the exit scan has
+    // to wait for the group rather than for the glyph it used to wait for.
+    for (let i = 0; i < n; i++) {
+      revealEnd[i] = groupLists[i][groupLists[i].length - 1].t;
+    }
   }
 
   const stops = [];
+  const lineEnds = [];
   for (let i = 0; i < n; i++) {
     const stage = stages[i % stages.length];
     const base = evalOrbit(rig, cues[i]);
@@ -278,22 +438,96 @@ export function layoutField(lines, opts = {}) {
       sx * fw * basis.right[1] + sy * fh * basis.up[1],
       sx * fw * basis.right[2] + sy * fh * basis.up[2],
     ];
+    const slot = [P[0] - off[0], P[1] - off[1], P[2] - off[2]];
     stops.push({
-      at: r3(starts[i]),
-      duration: r3(durs[i]),
+      at: r3(flightAt[i]),
+      duration: r3(flightDur[i]),
       ease: 'ease_in_out_cubic',
-      target: [r3(P[0] - off[0]), r3(P[1] - off[1]), r3(P[2] - off[2])],
+      target: slot.map(r3),
       radius: r3(radius),
       elevation: r3(elevation),
     });
+
+    let lastEnd = flightAt[i] + flightDur[i];
+    if (!choreo) {
+      lineEnds[i] = lastEnd;
+      continue;
+    }
+
+    // The phrase: an optional kick on the beat itself, then one move per gap
+    // between word groups. A tight line simply gets fewer moves, because the
+    // flight to its successor claims the rest of the gap.
+    const groups = groupLists[i];
+    const deadline = i + 1 < n ? flightAt[i + 1] : backAt;
+    const plan = [];
+    if (choreo[i].kick) plan.push({ m: choreo[i].kick, on: cues[i], kick: true });
+    for (let j = 1; j < groups.length; j++) {
+      plan.push({ m: choreo[i].between[j - 1], on: groups[j].t, kick: false });
+    }
+
+    let curR = radius;
+    let curE = elevation;
+    for (let k = 0; k < plan.length; k++) {
+      const { m, on, kick } = plan[k];
+      // A move spends a fraction of the gap to whatever comes next. `lead` > 0
+      // puts the camera ahead of the word, < 0 lets it trail — the two of them
+      // together are what stop the camera from landing on the beat every time.
+      const nextOn = k + 1 < plan.length ? plan[k + 1].on : deadline + 0.35;
+      const span = Math.max(nextOn - on, 0.18);
+      let dur = Math.max(0.18, Math.min(span * m.pace, 1.1));
+      let at = kick ? on : on - m.lead - dur;
+      at = Math.max(at, lastEnd + 0.02);
+      if (at + dur > deadline) dur = deadline - at;
+      if (dur < 0.12) continue;
+
+      const spec = MOVES[m.kind];
+      const dxN = (spec.dx || 0) * m.mag;
+      const dyN = (spec.dy || 0) * m.mag;
+      // Shrink the move until the line is still comfortably inside the frame
+      // at the new radius: a dolly in takes room away, a dolly out hands it
+      // back, and the outline rim needs ten percent either way.
+      let scale = 1;
+      let T = slot;
+      let nR = curR;
+      let nE = curE;
+      let ok = false;
+      for (let tries = 0; tries < 6; tries++) {
+        nR = clamp(curR + (spec.dR || 0) * m.mag * scale, rLo, rHi);
+        nE = clamp(curE + (spec.dE || 0) * m.mag * scale, 0, 0.42);
+        const fw2 = halfWAt(nR);
+        const fh2 = halfHAt(nR);
+        T = [
+          slot[0] + dxN * scale * fw2 * basis.right[0] + dyN * scale * fh2 * basis.up[0],
+          slot[1] + dxN * scale * fw2 * basis.right[1] + dyN * scale * fh2 * basis.up[1],
+          slot[2] + dxN * scale * fw2 * basis.right[2] + dyN * scale * fh2 * basis.up[2],
+        ];
+        if (framingFits(P, T, nR, nE, base.yaw, boxW[i], boxH[i], th, aspect, fov)) {
+          ok = true;
+          break;
+        }
+        scale *= 0.5;
+      }
+      if (!ok) continue;
+      // A move that ended up nowhere is not worth a stop: the rig eases
+      // stop-to-stop, and a degenerate stop only steals time from the real one.
+      if (nR === curR && nE === curE && Math.abs(T[0] - slot[0]) + Math.abs(T[1] - slot[1]) + Math.abs(T[2] - slot[2]) < 1e-3) {
+        continue;
+      }
+      stops.push({
+        at: r3(at),
+        duration: r3(dur),
+        ease: m.ease,
+        target: T.map(r3),
+        radius: r3(nR),
+        elevation: r3(nE),
+      });
+      curR = nR;
+      curE = nE;
+      lastEnd = at + dur;
+    }
+    lineEnds[i] = lastEnd;
   }
 
-  // ---- return to the title framing before the outro -----------------------
-  const tail = Number.isFinite(outroAt) ? outroAt : duration;
-  const lastCue = cues[n - 1];
-  let backAt = tail - 12;
-  if (backAt < lastCue + 0.6) backAt = lastCue + 0.6;
-  const backDur = tail - backAt;
   if (backDur >= 0.4) {
     const base = evalOrbit(rig, Math.min(tail, duration));
     stops.push({
@@ -311,7 +545,7 @@ export function layoutField(lines, opts = {}) {
   const exits = [];
   for (let i = 0; i < n; i++) {
     const P = positions[i];
-    const from = Math.max(cues[i] + fadeIn + 0.15, revealEnd[i] + 0.15);
+    const from = Math.max(cues[i] + fadeIn + 0.15, revealEnd[i] + 0.15, lineEnds[i] + 0.15);
     let exit = null;
     for (let t = from; t <= duration; t += step) {
       if (!boxOnFrame(evalOrbit(cam, t), P, boxW[i], boxH[i], fov, aspect)) {

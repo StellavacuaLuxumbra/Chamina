@@ -58,6 +58,13 @@ const USAGE = `chamina lrc → scene
                    lands. field = lay the song out as a serpentine path through
                    the world, give every cue its own camera stop, and keep each
                    line on screen until the camera has carried it out of frame.
+      --groups <mode>    off | auto (default off)
+                   auto cuts every line into word groups that land together and
+                   rides the camera through the phrase: each group gets its own
+                   move (a drop, a slide, a push in), timed so the camera
+                   sometimes arrives with the word and sometimes trails it.
+                   Requires --layout field for the camera moves; alone, it
+                   only changes how the glyphs are timed.
       --jitter <amp>     idle wobble on every line, world units (default off)
       --jitter-rot <rad> rotational part of the wobble (default 0)
       --jitter-freq <hz> wobble rate (default 5)
@@ -138,6 +145,7 @@ function parseArgs(argv) {
     bloom: 0.06,
     entrance: 'slide',
     layout: 'single',
+    groups: 'off',
     jitter: null,
     jitterRot: 0,
     jitterFreq: 5,
@@ -207,6 +215,7 @@ function parseArgs(argv) {
       case '--bloom': o.bloom = Number(next()); break;
       case '--entrance': o.entrance = next(); break;
       case '--layout': o.layout = next(); break;
+      case '--groups': o.groups = next(); break;
     case '--jitter': o.jitter = Number(next()); break;
     case '--jitter-rot': o.jitterRot = Number(next()); break;
     case '--jitter-freq': o.jitterFreq = Number(next()); break;
@@ -426,6 +435,9 @@ function main() {
   if (args.layout !== 'single' && args.layout !== 'field') {
     throw new Error(`--layout must be single or field (got "${args.layout}")`);
   }
+  if (args.groups !== 'off' && args.groups !== 'auto') {
+    throw new Error(`--groups must be off or auto (got "${args.groups}")`);
+  }
 
   const lrcPath = resolve(args.input);
   const parsed = parseLrc(fs.readFileSync(lrcPath, 'utf8'));
@@ -488,6 +500,7 @@ function main() {
         : 0.3,
       outroAt,
       titleOut,
+      groups: args.groups,
     });
     cameraAnimation.stops = layout.stops;
   }
@@ -502,6 +515,7 @@ function main() {
     fadeOut: args.fadeOut,
     stagger: args.stagger,
     entrance: args.entrance,
+    groups: args.groups,
     total: duration,
     fitWidth: fitWidth,
     jitter: Number.isFinite(args.jitter) && args.jitter > 0

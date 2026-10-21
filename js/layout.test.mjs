@@ -2,9 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { parseLrc, applyOffset } from './lrc.js';
+import { parseLrc, applyOffset, wordGroups, groupCharTimes } from './lrc.js';
 import { evalOrbit, cameraBasis, projectNDC } from './anim.mjs';
-import { emWidth, gridPositions, layoutField, STAGES, TRAVEL_MAX } from './layout.mjs';
+import {
+  emWidth,
+  gridPositions,
+  layoutField,
+  assignChoreo,
+  signatureOf,
+  STAGES,
+  TRAVEL_MAX,
+} from './layout.mjs';
 
 const DURATION = 367;
 const FOV = 0.8726646;
@@ -44,6 +52,40 @@ function birdLayout() {
     fadeIn: 0.3,
     outroAt: 318,
     titleOut: 15.34,
+  });
+}
+
+function birdGroupedLayout() {
+  return layoutField(birdLines(), {
+    camera: CAMERA,
+    duration: DURATION,
+    fov: FOV,
+    aspect: ASPECT,
+    size: 1.7,
+    fitWidth: FIT_WIDTH,
+    fadeIn: 0.3,
+    outroAt: 318,
+    titleOut: 15.34,
+    groups: 'auto',
+  });
+}
+
+/** The per-word phrase of every line, in the order layoutField used them. */
+function birdGroups() {
+  return birdLines().map((l, i) => wordGroups(l.text, l.charTimes, i));
+}
+
+/**
+ * Split the stop list into per-line phrases. A stop belongs to line i when it
+ * ends on or after line i's cue and strictly before the next line's — so the
+ * flight in belongs to the line it lands on, and the return to the title
+ * framing (which starts after the last cue) belongs to nobody.
+ */
+function phraseStops(lines, stops) {
+  const ends = stops.map((s) => s.at + s.duration);
+  return lines.map((l, i) => {
+    const next = i + 1 < lines.length ? lines[i + 1].time : stops[stops.length - 1].at;
+    return stops.filter((s, k) => ends[k] >= l.time - 1e-6 && ends[k] < next - 1e-6);
   });
 }
 
@@ -242,4 +284,176 @@ test('an empty song lays out to nothing', () => {
 test('the preset cycle never exceeds the stage list', () => {
   assert.ok(STAGES.length >= 6);
   assert.equal(STAGES.length, 7);
+});
+
+// ---------------------------------------------------------------------------
+// per-word choreography (`--groups auto`)
+// ---------------------------------------------------------------------------
+
+test('word groups cover every glyph and never straddle a space', () => {
+  const lines = birdLines();
+  for (let i = 0; i < lines.length; i++) {
+    const gs = wordGroups(lines[i].text, lines[i].charTimes, i);
+    assert.ok(gs && gs.length, `line ${i} grouped to nothing`);
+    const chars = Array.from(lines[i].text);
+    let cursor = 0;
+    for (const g of gs) {
+      assert.equal(g.i0, cursor, `line ${i} group does not start where the last one ended`);
+      assert.ok(g.i1 > g.i0, `line ${i} has an empty group`);
+      cursor = g.i1;
+      assert.notEqual(chars[g.i0], ' ', `line ${i} group starts on a space`);
+      // A group may ride a trailing space (the word plus the gap after it),
+      // but never a leading one.
+      if (chars[g.i1 - 1] === ' ') {
+        assert.ok(g.i1 === chars.length || chars[g.i1] !== ' ', `line ${i} swallows two spaces`);
+      }
+    }
+    assert.equal(cursor, chars.length, `line ${i} does not cover the whole line`);
+  }
+});
+
+test('a group lands on its own first glyph, never later', () => {
+  const lines = birdLines();
+  for (let i = 0; i < lines.length; i++) {
+    const gs = wordGroups(lines[i].text, lines[i].charTimes, i);
+    for (const g of gs) {
+      assert.equal(g.t, lines[i].charTimes[g.i0], `line ${i} group does not carry its first stamp`);
+      for (let k = g.i0; k < g.i1; k++) {
+        assert.ok(
+          lines[i].charTimes[k] >= g.t,
+          `line ${i} glyph ${k} is stamped before the group it belongs to`,
+        );
+      }
+    }
+  }
+});
+
+test('no two lines share a camera phrase', () => {
+  const counts = birdGroups().map((g) => g.length);
+  const choreo = assignChoreo(counts);
+  const sigs = choreo.map(signatureOf);
+  assert.equal(new Set(sigs).size, sigs.length, `only ${new Set(sigs).size} distinct phrases`);
+  assert.equal(sigs.length, 33);
+});
+
+test('every line is cut into at least one group, most into several', () => {
+  const counts = birdGroups().map((g) => g.length);
+  for (const c of counts) assert.ok(c >= 1, 'a line was cut to nothing');
+  const multi = counts.filter((c) => c > 1).length;
+  assert.ok(multi >= 28, `only ${multi} of ${counts.length} lines have a phrase`);
+});
+
+test('choreographed stops never overlap and stay in time order', () => {
+  const { stops } = birdGroupedLayout();
+  assert.ok(stops.length > 34, `only ${stops.length} stops, expected a move per word group`);
+  for (let i = 1; i < stops.length; i++) {
+    const prev = stops[i - 1];
+    assert.ok(
+      prev.at + prev.duration <= stops[i].at + 1e-6,
+      `stop ${i} at ${stops[i].at} starts before stop ${i - 1} finishes at ${prev.at + prev.duration}`,
+    );
+  }
+});
+
+test('a line is still framed at every stop of its own phrase', () => {
+  const lines = birdLines();
+  const { positions, stops } = birdGroupedLayout();
+  for (let i = 0; i < lines.length; i++) {
+    const [hw, hh] = boxHalfExtents(lines[i]);
+    for (const s of phraseStops(lines, stops)[i]) {
+      const pts = corners(positions[i], hw, hh, {
+        radius: s.radius,
+        elevation: s.elevation,
+        target: s.target,
+        yaw: evalOrbit(CAMERA, s.at + s.duration).yaw,
+      });
+      for (const p of pts) {
+        assert.ok(p, `line ${i} has a corner behind the camera mid-phrase`);
+        assert.ok(Math.abs(p[0]) <= 1.05, `line ${i} slides off the side: ${p[0].toFixed(3)}`);
+        assert.ok(Math.abs(p[1]) <= 1.05, `line ${i} slides off the top: ${p[1].toFixed(3)}`);
+      }
+    }
+  }
+});
+
+test('a phrase never runs into the flight that carries the camera away', () => {
+  const lines = birdLines();
+  const { stops } = birdGroupedLayout();
+  for (let i = 0; i < lines.length; i++) {
+    const own = phraseStops(lines, stops)[i];
+    assert.ok(own.length >= 1, `line ${i} has no flight stop`);
+    // The flight settles exactly on the cue, so every other stop of the phrase
+    // begins after it and finishes before the next flight takes over.
+    const flight = own[0];
+    assert.ok(Math.abs(flight.at + flight.duration - lines[i].time) < 0.002);
+    for (let k = 1; k < own.length; k++) {
+      assert.ok(
+        own[k].at >= flight.at + flight.duration - 1e-6,
+        `stop ${k} of line ${i} begins inside the flight in`,
+      );
+    }
+    if (i + 1 < lines.length) {
+      const nextFlight = stops.find(
+        (s) => Math.abs(s.at + s.duration - lines[i + 1].time) < 0.002,
+      );
+      assert.ok(own[own.length - 1].at + own[own.length - 1].duration <= nextFlight.at + 1e-6);
+    }
+  }
+});
+
+test('the opening move lands with the first word, not after it', () => {
+  const lines = birdLines();
+  const { stops } = birdGroupedLayout();
+  const gs = wordGroups(lines[0].text, lines[0].charTimes, 0);
+  assert.ok(gs.length >= 2);
+  // Everything after the flight in and before the flight out is the opening
+  // line's phrase; none of it may outlast the gap to the next cue.
+  const own = phraseStops(lines, stops)[0];
+  assert.ok(own.length >= 2, `the opening line gets ${own.length} stops`);
+  const cue = lines[0].time;
+  const nextCue = lines[1].time;
+  for (const s of own.slice(1)) {
+    assert.ok(s.duration <= 1.2, `opening move takes ${s.duration}s`);
+    assert.ok(s.at >= cue - 1e-6, `opening move starts at ${s.at}, before its cue`);
+    assert.ok(s.at + s.duration <= nextCue, `opening move runs past the next cue`);
+  }
+});
+
+// The grouped layout is the one that gets rendered, so its screen invariants
+// are checked against the compressed glyph times the render actually uses —
+// grouping pulls every glyph of a word onto the group's first stamp.
+test('grouping keeps the screen from sitting empty or doubling up', () => {
+  const lines = birdLines();
+  const { exits } = birdGroupedLayout();
+  const cues = lines.map((l) => l.time);
+
+  let worst = 0;
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (exits[i] === null) continue;
+    const blank = cues[i + 1] - exits[i];
+    worst = Math.max(worst, blank);
+    assert.ok(blank <= TRAVEL_MAX, `line ${i} leaves ${blank.toFixed(2)}s of empty screen`);
+  }
+  assert.ok(worst > 0.2, `outgoing line lingers ${worst.toFixed(2)}s into the next cue`);
+
+  let peak = 0;
+  for (let t = 15; t < 318; t += 0.1) {
+    let n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const out = exits[i] === null ? 367 : exits[i];
+      if (t >= cues[i] && t < out + 0.45) n++;
+    }
+    peak = Math.max(peak, n);
+  }
+  assert.ok(peak <= 2, `${peak} lines visible at once`);
+
+  for (let i = 0; i < lines.length; i++) {
+    assert.ok(exits[i] !== null, `line ${i} never leaves the shot`);
+    const ct = groupCharTimes(lines[i].text, lines[i].charTimes, i);
+    const reveal = Math.max(...ct);
+    assert.ok(
+      exits[i] >= reveal + 0.15 - 1e-6,
+      `line ${i} fades at ${exits[i]}, its last word lands ${reveal}`,
+    );
+  }
 });

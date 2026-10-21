@@ -174,6 +174,133 @@ const clampNum = (v, fallback, lo, hi) => {
   return Math.min(hi, Math.max(lo, n));
 };
 
+// ---------------------------------------------------------------------------
+// word grouping
+// ---------------------------------------------------------------------------
+
+const thirds = (n) => {
+  const a = Math.round(n / 3);
+  const b = Math.round((n - a) / 2);
+  return [a, b, n - a - b];
+};
+
+const chunks = (n, k) => {
+  const out = [];
+  let left = n;
+  for (let i = k; i > 0; i--) {
+    const take = Math.max(1, Math.round(left / i));
+    out.push(Math.min(take, left - (i - 1)));
+    left -= out[out.length - 1];
+  }
+  return out.filter((x) => x > 0);
+};
+
+/**
+ * How a phrase gets cut into groups that land together. Every entry takes the
+ * phrase length and returns piece sizes that sum to it.
+ *
+ * The list is deliberately wide: the same staging twice in a row is the one
+ * thing a lyric video cannot afford, and 33 lines of different lengths have to
+ * feel like 33 different ideas rather than one idea thirty-three times.
+ */
+const PHRASE_CUTS = [
+  (n) => [n],
+  (n) => (n >= 2 ? [1, n - 1] : [n]),
+  (n) => (n >= 3 ? [2, n - 2] : [n]),
+  (n) => (n >= 4 ? [1, 1, n - 2] : [n]),
+  (n) => (n >= 2 ? [n - 1, 1] : [n]),
+  (n) => (n >= 2 ? [Math.ceil(n / 2), Math.floor(n / 2)] : [n]),
+  (n) => (n >= 3 ? thirds(n) : [n]),
+  (n) => (n >= 4 ? [1, n - 2, 1] : [n]),
+  (n) => chunks(n, 2),
+  (n) => chunks(n, 3),
+  (n) => (n >= 5 ? [1, 2, n - 3] : [n]),
+  (n) => (n >= 5 ? [n - 3, 2, 1] : [n]),
+  (n) => (n >= 6 ? [2, 2, n - 4] : [n]),
+  (n) => (n >= 6 ? [3, 1, n - 4] : [n]),
+  (n) => (n >= 3 ? [1, Math.ceil((n - 1) / 2), n - 1 - Math.ceil((n - 1) / 2)] : [n]),
+];
+
+export const PHRASE_CUT_COUNT = PHRASE_CUTS.length;
+
+/**
+ * Cuts written by hand instead of picked from the rhythm. The key is
+ * `lineIndex:phraseIndex`.
+ *
+ * Line 0 is the signature: the singer takes 远 / 离 / 那些繁华悲伤 as three
+ * separate gestures, and the rhythm that falls out of the formula lumps the
+ * whole first phrase onto one beat. The second phrase is overridden to match —
+ * the formula would hand it the same 1-1-rest shape as the first, and a line
+ * that repeats its own rhythm reads as one idea said twice.
+ */
+const PHRASE_CUT_OVERRIDES = new Map([
+  ['0:0', PHRASE_CUTS[3]],
+  ['0:1', PHRASE_CUTS[12]],
+]);
+
+/**
+ * Cut a word-timed line into groups that land together.
+ *
+ * A group always breaks at a space (the space rides with the word before it),
+ * and each phrase between spaces is then cut by a rhythm picked from the line
+ * and phrase index. Nothing here reads the audio: the rhythm is a function of
+ * the text and the index alone, so regenerating reproduces it exactly.
+ *
+ * @param {string} text
+ * @param {number[]} charTimes one absolute time per glyph
+ * @param {number} seed line index
+ * @returns {{i0:number,i1:number,t:number,kind:number}[]|null} half-open glyph
+ *   ranges with the time the whole group lands on (its first glyph's stamp)
+ */
+export function wordGroups(text, charTimes, seed = 0) {
+  if (!Array.isArray(charTimes) || !charTimes.length) return null;
+  const chars = Array.from(text);
+  const n = Math.min(chars.length, charTimes.length);
+  if (!n) return null;
+  const out = [];
+  let phraseStart = 0;
+  let phraseIndex = 0;
+  const flush = (phraseEnd) => {
+    const len = phraseEnd - phraseStart;
+    if (len <= 0) return;
+    const kind = (seed * 5 + phraseIndex * 3) % PHRASE_CUTS.length;
+    const cut = PHRASE_CUT_OVERRIDES.get(`${seed}:${phraseIndex}`) || PHRASE_CUTS[kind];
+    let i = phraseStart;
+    for (const piece of cut(len)) {
+      if (piece <= 0) continue;
+      out.push({ i0: i, i1: i + piece, t: charTimes[i], kind });
+      i += piece;
+    }
+    phraseIndex += 1;
+  };
+  for (let i = 0; i < n; i++) {
+    if (chars[i] === ' ') {
+      // Cut *after* the space, so the gap rides with the word it follows and
+      // the groups tile the whole line with no holes.
+      flush(i + 1);
+      phraseStart = i + 1;
+    }
+  }
+  flush(n);
+  return out.length ? out : null;
+}
+
+/**
+ * Compress per-glyph stamps onto their group: every glyph in a group carries
+ * the stamp of the group's first glyph, so the whole word lands on one beat.
+ * The last stamp of the line only ever moves earlier, never later, so a
+ * fade-out that waits on the last glyph keeps waiting long enough.
+ */
+export function groupCharTimes(text, charTimes, seed = 0) {
+  const groups = wordGroups(text, charTimes, seed);
+  if (!groups) return charTimes;
+  const out = charTimes.slice();
+  for (const g of groups) {
+    for (let i = g.i0; i < g.i1; i++) out[i] = g.t;
+  }
+  return out;
+}
+
 /**
  * Turn timed lines into a `texts[]` array.
  *
@@ -211,6 +338,7 @@ export function buildLyricTexts(lines, opts = {}) {
   const fit = Number.isFinite(fitWidth) && fitWidth > 0 ? fitWidth : null;
 
   const out = [];
+  let lyricIndex = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.text) continue;
@@ -220,9 +348,17 @@ export function buildLyricTexts(lines, opts = {}) {
     // Word-timed lines light up glyph by glyph, so the fade-out has to wait for
     // the last one — otherwise the tail of a line would start disappearing the
     // moment it appears. Absent per-glyph times nothing changes here.
-    const charTimes = Array.isArray(line.charTimes)
+    const charTimesRaw = Array.isArray(line.charTimes)
       ? line.charTimes.slice(0, line.text.length).map((v) => round3(v + offset))
       : null;
+    // `groups: 'auto'` lands each word as one beat rather than glyph by glyph:
+    // the stamps get compressed onto their group, which is what lets a camera
+    // move ride the gap between words instead of being drowned by sixteen of
+    // them. Off by default, so nothing about the plain word-timed export moves.
+    const charTimes =
+      charTimesRaw && opts.groups === 'auto'
+        ? groupCharTimes(line.text, charTimesRaw, lyricIndex).map(round3)
+        : charTimesRaw;
     const lastGlyph = charTimes && charTimes.length ? Math.max(...charTimes) : t;
     const nextRaw = lines[i + 1] ? lines[i + 1].time + offset : total;
     const next = Number.isFinite(nextRaw) ? nextRaw : t + 3;
@@ -313,6 +449,7 @@ export function buildLyricTexts(lines, opts = {}) {
     // to fall on the same rhythm.
     if (charTimes) block.char_times = charTimes;
     out.push(block);
+    lyricIndex += 1;
   }
   return out;
 }
