@@ -369,6 +369,8 @@ export function evalOrbit(o, t) {
   let tx = o.target[0];
   let ty = o.target[1];
   let tz = o.target[2];
+  let yawOff = 0;
+  let rollOff = 0;
 
   const m = o.movement;
   if (m) {
@@ -394,6 +396,8 @@ export function evalOrbit(o, t) {
     let ftx = tx;
     let fty = ty;
     let ftz = tz;
+    let fyaw = yawOff;
+    let froll = rollOff;
     for (const s of stops) {
       const at = s.at ?? 0;
       if (t < at) break;
@@ -403,20 +407,32 @@ export function evalOrbit(o, t) {
       const ttx = s.target ? s.target[0] : ftx;
       const tty = s.target ? s.target[1] : fty;
       const ttz = s.target ? s.target[2] : ftz;
+      const tyaw = s.yaw ?? fyaw;
+      const troll = s.roll ?? froll;
       radius = lerp(fr, tr, k);
       elevation = lerp(fe, te, k);
       tx = lerp(ftx, ttx, k);
       ty = lerp(fty, tty, k);
       tz = lerp(ftz, ttz, k);
+      yawOff = lerp(fyaw, tyaw, k);
+      rollOff = lerp(froll, troll, k);
       fr = tr;
       fe = te;
       ftx = ttx;
       fty = tty;
       ftz = ttz;
+      fyaw = tyaw;
+      froll = troll;
     }
   }
 
-  return { radius, elevation, target: [tx, ty, tz], yaw: o.start_yaw + o.speed * t };
+  return {
+    radius,
+    elevation,
+    target: [tx, ty, tz],
+    yaw: o.start_yaw + o.speed * t + yawOff,
+    roll: rollOff,
+  };
 }
 
 /** World position of the eye for an orbit state. */

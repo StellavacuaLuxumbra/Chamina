@@ -944,3 +944,94 @@ node js/render.js --data target/chamina/scene_data.json --probe cues
 - 成片 **`out/鸟之诗-v7.mp4`**：00:06:07.00 / 1920×1080 / 60 fps / h264+aac，197 MB。
 - 收尾留白：末句 309.54 出画 → 318 落回开场构图 + outro 卡，**8.5 s**，
   与 `groups=off` 的 8.4 s 一致（第 2 步就是这样，不是本步引入的）。
+
+
+## 十、尾奏音频可视化 + 生日文案（v8）
+
+**10.1 动机**：v7 成片 318→367 有 49 s 静止标题卡，观众流失点。需求：
+尾奏必须出现「祝嫣嫣生日快乐！」「愿你的世界永远有风」两行（可自定时间
+位置），并加入音频可视化。
+
+**10.2 通路（新增，全部 flag 门控）**：
+- `js/audio-env.mjs`：ffmpeg 管解码 → f32le mono 44.1k → Hann 窗 +
+  radix-2 FFT（N=2048，hop=735）→ 64 个对数频带（40 Hz–14 kHz）→
+  dB 映射 −60..0 → 逐帧（60 fps）包络 JSON（22068 帧，3.3 MB，2.8 s）。
+  修复点：原始幅值未除 N/2（Hann 相干增益）导致全程顶满 1.0，归一后
+  正片 avg≈0.3、尾奏 ~335s 起 avg≈0.10、t≈360 近无声——音乐先收、
+  靠静音段承载余韵，文案节奏据此决定。
+- `js/render.js --audio-env <file>`：校验存在 → 服务器加路由
+  `/audio_env.json` → 页面 query 追加 `audioenv=1`。
+- `js/scene.js buildSpectrumRing`：64 带 × 7 径向 = 448 点金环
+  （#ffd27a，中心 (0,0.8,−1.2)，r 4.0→5.6，z 在文字面之后，additive）。
+  顶点着色器按 `uBand[band]` 点亮径向段（smoothstep 阈值），基线 0.16
+  暗点；静音段不靠音频也有 0.06 rad/s 慢转 + 逐带 1.7 rad/s 微光呼吸。
+  `setFrame` 逐帧纯函数驱动（禁用时间平滑保证 seek/分块确定性），
+  uFade 318→321 渐入、末 2 s 渐出；低八带均值同时泵基线粒子云
+  uOpacity（0.9 × 1+0.28·bass·fade，环外窗口回到精确 0.9）。
+- `js/lrc2scene.mjs`：`--outro-subtitle`（替换尾卡副标题，默认
+  `--subtitle`）、`--outro-wish`（尾卡后 15 s 落下的祝语行，
+  y −1.7、fitWidth×0.45、stagger 0.05）。
+
+**10.3 文案节奏**：318 尾卡《鸟之诗》；318.35「祝嫣嫣生日快乐！」；
+333「愿你的世界永远有风」——音乐 ~335s 收尾时祝福落下，静音段
+（340→365）由旋转微光的环 + 粒子云呼吸承载。
+
+**10.4 验证**：静帧 t=325（满能量频谱环、上弧顶满）与 t=340（静音段
+呼吸不僵）；`scene ready: 542 glyphs` 不变、points 2；无 flag 重生成
+`bird.single.json` = `7965A1510D46ABCCEF0D62B8DC5E6A5FE56225A5EBFFB8952F0F62E64EDDFF06`
+字节一致；重渲 p6（18000+3000）、p7（21000+1020），v7_p0–p5复用，
+concat→`out/鸟之诗-v8.mp4`：00:06:07.00，1920×1080 60 fps，H.264 High
++ AAC 192 kb/s，203.4 MB。
+
+**10.5 坑**：PS 5.1 内联 node -e 多 replace 引号转义炸 parser——
+补丁脚本必须 Write 工具落盘再 node 执行；`THREE` 默认 uniforms
+map 应一次给全，事后 `mat.uniforms.x = …` 虽然可行但可读性差。
+复现：`node target/chamina/_regen_v8.mjs`（= v7 全参 +
+`--layout field --groups auto --outro-subtitle 祝嫣嫣生日快乐！
+--outro-wish 愿你的世界永远有风`）+ `node js/audio-env.mjs` /
+`render.js --audio-env`。
+
+
+## 十一、v9：真·词级入场 + 旋转/缩放运镜
+
+**11.1 反馈**：逐字/大块入场生硬；镜头拉太远看不到原句；希望旋转、旋转缩放
+转场；每个词随唱出现。
+
+**11.2 词级入场**：
+- LRC 只有逐字时间戳、无分词。`js/lrc.js` 新增 `WORD_SPLIT_SPECS`：33 行固定
+  语料中 20 条不重复文本手工分词（如「远离|那些|繁华|悲伤 |我们|从此|
+  告别了|过往」），空格随前一词，pieces 恰好铺满整行；无表项的行回退到原
+  `PHRASE_CUTS` 公式。
+- `groupCharTimes` 在词首戳基础上给词内每字 +35 ms 微扫：词整体落拍，字从左
+  到右软扫入，消除"印章式"整块闪现。
+- `layoutField` 的 `revealEnd` 同步计入词内微扫；`--probe cues` 37/37 全亮。
+
+**11.3 旋转/缩放运镜**：
+- `CameraStop`（Rust scene.rs）新增可选 `yaw`（在轨道 yaw 上的偏移）与
+  `roll`（视轴滚转）；`evalOrbit` 按 stop 绝对值 lerp，返回 `yaw/roll`；
+  `scene.js` 在 `lookAt` 后 `rotateZ(roll)`，shake roll 叠加其上。
+- `MOVES` v9：rollL/rollR、yawL/yawR、push/pull、crane/tilt + 四个小幅
+  pan；平移幅度压到旧值的 ~40%，主戏交给转与缩。
+- 每行半径预算改为**逐行 ±1.3**（`lineBase = evalOrbit(rig, cue)`），
+  STAGES `rAdd` 收紧到 0–0.8：全片半径 12.27–15.30（v7 曾到 20.5），
+  文字始终占幅。`framingFits` 改为四角实测 + roll 膨胀（yaw 摆动下中心
+  近似会低估边缘）；`boxOnFrame` 的退出判定同样按 roll 膨胀。
+- 每次转场（flight）带交替 `yaw ±0.03–0.07`、`roll ±0.02–0.05`，验证不过
+  则归零；行内 move 的 yaw/roll 上限 ±0.26 / ±0.24 rad。回标题的收尾 stop
+  显式 `yaw:0, roll:0`，结尾必须水平。
+
+**11.4 坑**：
+- 频谱环着色器声明了 `uFade` 却漏乘——静帧 t=17.5 抓到金环压在全片开头
+  （`vGlow *= uFade` 修复）。
+- 首版 `rHi` 仍用全局 `rmax`，base 14 时上限 16 形同没缩；改为逐行基准
+  ±1.3 后才真正拉近。
+- 居中整行布局下，逐渐显现的句首天然偏左（行整体居中）；这是卡拉OK 正常
+  观感，不是错位。
+
+**11.5 验证与成片**：`node --test` 87/87（改 1 条旧断言：dolly 幅度大 →
+保持贴近 + roll/yaw 多样性）；`cargo test` 32+1、clippy 0、fmt clean；
+无 flag 重生成仍 `7965A151…` 字节一致；静帧 t=17.5/18.9/87/330 核对词级
+节奏、roll 转场、尾奏环回归；8 段全片重渲（0/3000/…/21000）→
+`out/鸟之诗-v9.mp4`：00:06:07.00，1920×1080 60 fps，H.264 High + AAC
+192 kb/s，217.0 MB。复现：`node target/chamina/_regen_v8.mjs`（参数未变）
++ `node js/audio-env.mjs 鸟之诗.mp3` + `render.js --audio-env …`。

@@ -247,6 +247,15 @@ pub struct CameraStop {
     /// Elevation (radians); `None` keeps following `movement`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elevation: Option<f32>,
+    /// Extra yaw offset (radians) on top of the orbit's own yaw; `None` keeps
+    /// the previous one. This is what lets a stop swing around the line
+    /// instead of sliding away from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    /// Camera roll around the view axis (radians); `None` keeps the previous
+    /// one. Positive banks the picture clockwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roll: Option<f32>,
 }
 
 impl Default for CameraStop {
@@ -258,6 +267,8 @@ impl Default for CameraStop {
             target: None,
             radius: None,
             elevation: None,
+            yaw: None,
+            roll: None,
         }
     }
 }

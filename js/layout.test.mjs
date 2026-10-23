@@ -89,15 +89,20 @@ function phraseStops(lines, stops) {
   });
 }
 
-/** ndc of every corner of the box around `P`. */
+/** ndc of every corner of the box around `P`, with the camera's roll applied. */
 function corners(P, hw, hh, state, fov = FOV, aspect = ASPECT) {
   const basis = cameraBasis(state);
+  const roll = state.roll || 0;
+  const c = Math.cos(-roll);
+  const s = Math.sin(-roll);
   return [
     [P[0] - hw, P[1] - hh, P[2]],
     [P[0] + hw, P[1] - hh, P[2]],
     [P[0] - hw, P[1] + hh, P[2]],
     [P[0] + hw, P[1] + hh, P[2]],
-  ].map((c) => projectNDC(basis, c, fov, aspect));
+  ]
+    .map((p) => projectNDC(basis, p, fov, aspect))
+    .map((p) => (p ? [p[0] * c - p[1] * s, p[0] * s + p[1] * c] : p));
 }
 
 function boxHalfExtents(line) {
@@ -194,7 +199,13 @@ test('framing actually varies from line to line', () => {
   }
   assert.ok(seen.size >= 6, `only ${seen.size} distinct framings`);
   assert.ok(maxX > 40, `targets only travel ${maxX} units sideways`);
-  assert.ok(spread > 2, `the dolly never moves more than ${spread}`);
+  // v9 keeps the rig close on purpose — the old 4.5-unit wide stages are what
+  // made the picture feel far away. Variety now comes from bank and swing.
+  assert.ok(spread <= 1.4, `the dolly drifts ${spread} units off the base radius`);
+  const rolls = new Set(stops.map((s) => (s.roll ?? 0).toFixed(3)));
+  const yaws = new Set(stops.map((s) => (s.yaw ?? 0).toFixed(3)));
+  assert.ok(rolls.size >= 4, `only ${rolls.size} distinct rolls`);
+  assert.ok(yaws.size >= 4, `only ${yaws.size} distinct yaw offsets`);
 });
 
 test('each line leaves the frame only after it has fully appeared', () => {
@@ -365,7 +376,8 @@ test('a line is still framed at every stop of its own phrase', () => {
         radius: s.radius,
         elevation: s.elevation,
         target: s.target,
-        yaw: evalOrbit(CAMERA, s.at + s.duration).yaw,
+        yaw: evalOrbit(CAMERA, s.at + s.duration).yaw + (s.yaw ?? 0),
+        roll: s.roll ?? 0,
       });
       for (const p of pts) {
         assert.ok(p, `line ${i} has a corner behind the camera mid-phrase`);

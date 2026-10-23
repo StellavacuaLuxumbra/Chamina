@@ -38,6 +38,7 @@ const USAGE = `chamina renderer
   --port <n>           local server port (default: ephemeral)
   --url <query>        extra query string for scene.html (e.g. "debug=1")
   --audio <file>       mux this audio track into the output video
+--audio-env <file>   per-frame spectrum envelope for the outro visualiser
   --gpu                render on the GPU (D3D11) instead of SwiftShader
   --probe <spec>       check that every cue lights up, then exit.
                        spec = "cues", "cues@<sec>" or "1.5,20.2,..."
@@ -56,6 +57,7 @@ function parseArgs(argv) {
     port: 0,
     url: '',
     audio: null,
+  audioEnv: null,
     gpu: false,
     probe: null,
     help: false,
@@ -79,6 +81,7 @@ function parseArgs(argv) {
       case '--port': o.port = Number(next()); break;
       case '--url': o.url = next(); break;
       case '--audio': o.audio = next(); break;
+    case '--audio-env': o.audioEnv = next(); break;
       case '--gpu': o.gpu = true; break;
       case '--probe': o.probe = next(); break;
       case '-h':
@@ -106,7 +109,7 @@ const MIME = {
   '.map': 'application/json',
 };
 
-function startServer(dataPath, port) {
+function startServer(dataPath, port, audioEnvPath) {
   const server = http.createServer((req, res) => {
     let urlPath;
     try {
@@ -126,6 +129,8 @@ function startServer(dataPath, port) {
       file = path.join(__dirname, 'scene.js');
     } else if (urlPath === '/scene_data.json') {
       file = dataPath;
+    } else if (urlPath === '/audio_env.json') {
+      file = audioEnvPath;
     } else {
       const target = path.normalize(path.join(__dirname, urlPath));
       const root = path.normalize(__dirname + path.sep);
@@ -282,7 +287,10 @@ async function main() {
 
   if (outPath) fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
-  const server = await startServer(dataPath, opts.port);
+  if (opts.audioEnv && !fs.existsSync(opts.audioEnv)) {
+    throw new Error(`--audio-env: no such file: ${opts.audioEnv}`);
+  }
+  const server = await startServer(dataPath, opts.port, opts.audioEnv);
   const port = server.address().port;
   const base = `http://127.0.0.1:${port}`;
 
@@ -323,7 +331,9 @@ async function main() {
       if (m.type() === 'error') log(`console: ${m.text()}`);
     });
 
-    const query = opts.url ? (opts.url.startsWith('?') ? opts.url : `?${opts.url}`) : '';
+    const query =
+    (opts.url ? (opts.url.startsWith('?') ? opts.url : `?${opts.url}`) : '') +
+    (opts.audioEnv ? (opts.url ? '&' : '?') + 'audioenv=1' : '');
     await page.goto(`${base}/scene.html${query}`, { waitUntil: 'load', timeout: 120000 });
     await page.waitForFunction('window.__READY__ === true', { timeout: 180000 });
 

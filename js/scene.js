@@ -39,6 +39,9 @@ const DEBUG = flag('debug');
 const FRONT = DEBUG || flag('front');
 const NOPOST = DEBUG || flag('nopost');
 const NOPARTICLES = DEBUG || flag('noparticles');
+// Outro audio visualiser: on when render.js was given --audio-env, which also
+// serves /audio_env.json and appends audioenv=1 to the page query.
+const AUDIO_ENV = QS.get('audioenv') === '1';
 const NOLIGHTS = DEBUG || flag('nolights');
 const BOX = DEBUG ? false : flag('box');
 const NOOUTLINE = flag('nooutline');
@@ -382,6 +385,120 @@ function buildParticles(meta) {
   state.particles = points;
 }
 
+// Outro spectrum ring: 64 frequency bands laid out clockwise around a circle
+// behind the closing card, each band a short radial run of points that lights
+// up as far as its energy reaches. Driven per-frame from the precomputed
+// envelope (js/audio-env.mjs); the shape itself never changes, only the
+// uniforms, so seeking stays deterministic.
+async function buildSpectrumRing(meta, texts) {
+  const res = await fetch('/audio_env.json');
+  if (!res.ok) throw new Error(`cannot load audio_env.json: ${res.status}`);
+  const env = await res.json();
+  const B = env.bands;
+
+  let ringStart = Infinity;
+  for (const tx of texts) {
+    const a = tx.animations && tx.animations[0];
+    if (a && a.start_at > 60 && a.start_at < ringStart) ringStart = a.start_at;
+  }
+  if (!Number.isFinite(ringStart)) ringStart = 0;
+
+  const CX = 0;
+  const CY = 0.8;
+  const CZ = -1.2;
+  const R0 = 4.0;
+  const R1 = 5.6;
+  const RADIAL = 7;
+  const N = B * RADIAL;
+
+  const pos = new Float32Array(N * 3);
+  const aBand = new Float32Array(N);
+  const aK = new Float32Array(N);
+  for (let b = 0; b < B; b++) {
+    const ang = -Math.PI / 2 + (b / B) * Math.PI * 2;
+    const dx = Math.cos(ang);
+    const dy = Math.sin(ang);
+    for (let k = 0; k < RADIAL; k++) {
+      const i = b * RADIAL + k;
+      const r = R0 + ((R1 - R0) * k) / (RADIAL - 1);
+      pos[i * 3 + 0] = CX + dx * r;
+      pos[i * 3 + 1] = CY + dy * r;
+      pos[i * 3 + 2] = CZ;
+      aBand[i] = b;
+      aK[i] = k;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aBand', new THREE.BufferAttribute(aBand, 1));
+  geo.setAttribute('aK', new THREE.BufferAttribute(aK, 1));
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(CX, CY, CZ), R1 + 1);
+
+  const uniforms = {
+    uBand: { value: new Float32Array(B) },
+    uFade: { value: 0 },
+    uTime: { value: 0 },
+    uColor: { value: new THREE.Color('#ffd27a') },
+    uOpacity: { value: 0.95 },
+  };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      attribute float aBand;
+      attribute float aK;
+      uniform float uBand[64];
+      uniform float uFade;
+      uniform float uTime;
+      varying float vGlow;
+      void main() {
+        // Slow idle rotation keeps the ring alive once the track has faded.
+        float ang = uTime * 0.06;
+        vec3 c = vec3(cos(ang), sin(ang), 0.0);
+        vec3 rel = position - vec3(0.0, 0.8, 0.0);
+        vec3 p = vec3(0.0, 0.8, 0.0) + vec3(rel.x * c.x - rel.y * c.y, rel.x * c.y + rel.y * c.x, rel.z);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        float e = uBand[int(aBand + 0.5)];
+        float lvl = e * 7.0;
+        float lit = smoothstep(aK - 0.45, aK + 0.05, lvl);
+        // Shimmer gives every point a lazy sine so the quiet tail still moves.
+        float shim = 0.5 + 0.5 * sin(uTime * 1.7 + aBand * 1.53);
+        float size = mix(0.9, 2.2, lit) * (0.75 + 0.45 * e);
+        gl_PointSize = min(size * (260.0 / max(-mv.z, 0.001)), 44.0);
+        vGlow = 0.16 + 0.84 * lit * (0.72 + 0.28 * shim);
+        vGlow *= smoothstep(2.0, 7.0, -mv.z);
+        vGlow *= uFade;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      varying float vGlow;
+      void main() {
+        float d = length(gl_PointCoord - vec2(0.5));
+        float a = smoothstep(0.5, 0.0, d);
+        a = a * a * vGlow * uOpacity;
+        if (a <= 0.001) discard;
+        gl_FragColor = vec4(uColor * a * 2.0, a);
+      }
+    `,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  state.scene.add(points);
+  state.env = env;
+  state.envUniforms = uniforms;
+  state.envWindow = {
+    start: ringStart,
+    dur: meta.total_frames / meta.fps,
+  };
+}
+
 /**
  * Timeline-driven sky. A real sphere (not a screen quad) so it stays a normal
  * piece of geometry: it gets correct depth, blurs under DOF, and blooms along
@@ -644,7 +761,7 @@ function updateCamera(t) {
   let py = ty + rig.radius * se;
   let pz = tz + rig.radius * ce * Math.sin(yaw);
 
-  let roll = 0;
+  let roll = rig.roll || 0;
   const s = o.shake;
   // `shakeWeight` gates on the cues directly, so a cue-gated rig still kicks
   // when the FX rack is off.
@@ -682,7 +799,7 @@ function updateCamera(t) {
     tx += ox;
     ty += oy;
     tz += oz;
-    roll = n[1] * (s.roll ?? 0) * env;
+    roll = (rig.roll || 0) + n[1] * (s.roll ?? 0) * env;
   }
 
   state.camTarget = [tx, ty, tz];
@@ -765,6 +882,32 @@ function setFrame(t) {
 
   if (state.particleUniforms) state.particleUniforms.uTime.value = t;
 
+  // Spectrum ring + particle breathing, only when an envelope was provided.
+  // Outside the outro window uFade is 0 and the base particle opacity is
+  // exactly its constructed 0.9, so lyric sections are untouched.
+  if (state.env) {
+    const env = state.env;
+    const fi = Math.min(env.frames - 1, Math.max(0, Math.round(t * env.fps)));
+    const row = env.data[fi];
+    const bandArr = state.envUniforms.uBand.value;
+    let bass = 0;
+    for (let i = 0; i < bandArr.length; i++) {
+      bandArr[i] = row[i];
+      if (i < 8) bass += row[i];
+    }
+    bass /= 8;
+
+    const w = state.envWindow;
+    let fade = 1;
+    if (t < w.start) fade = 0;
+    else if (t < w.start + 3) fade = (t - w.start) / 3;
+    const outFrom = w.dur - 2;
+    if (t > outFrom) fade = Math.min(fade, Math.max(0, (w.dur - t) / 2));
+    state.envUniforms.uFade.value = fade;
+    state.envUniforms.uTime.value = t;
+    state.particleUniforms.uOpacity.value = 0.9 * (1 + 0.28 * bass * fade);
+  }
+
   if (NOPOST) state.renderer.render(state.scene, state.camera);
   else state.composer.render();
 }
@@ -826,6 +969,7 @@ async function main() {
     buildText(data.texts[i], i);
   }
   buildParticles(meta);
+  if (AUDIO_ENV) await buildSpectrumRing(meta, data.texts);
   buildComposer(meta, w, h);
 
   updateCamera(0);

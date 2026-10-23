@@ -72,12 +72,12 @@ export function emWidth(text) {
  */
 export const STAGES = [
   { rAdd: 0.0, sx: 0.0, sy: 0.0, el: 0.0 }, // 0 centre close-up
-  { rAdd: 4.5, sx: -0.22, sy: 0.24, el: 0.05 }, // 1 wide, upper-left
-  { rAdd: 2.0, sx: 0.11, sy: -0.34, el: -0.03 }, // 2 mid, lower-right
-  { rAdd: 3.0, sx: 0.0, sy: 0.44, el: 0.07 }, // 3 high angle, top third
-  { rAdd: 4.5, sx: 0.22, sy: -0.16, el: -0.02 }, // 4 widest, right
-  { rAdd: 1.0, sx: -0.05, sy: -0.44, el: 0.04 }, // 5 low close, bottom third
-  { rAdd: 3.5, sx: 0.16, sy: 0.18, el: -0.06 }, // 6 wide diagonal
+  { rAdd: 0.6, sx: -0.16, sy: 0.14, el: 0.03 }, // 1 slight wide, upper-left
+  { rAdd: 0.25, sx: 0.07, sy: -0.2, el: -0.02 }, // 2 near, lower-right
+  { rAdd: 0.8, sx: 0.0, sy: 0.24, el: 0.04 }, // 3 high angle, top third
+  { rAdd: 0.45, sx: 0.14, sy: -0.08, el: -0.01 }, // 4 near, right
+  { rAdd: 0.15, sx: -0.04, sy: -0.22, el: 0.02 }, // 5 low close, bottom third
+  { rAdd: 0.65, sx: 0.1, sy: 0.1, el: -0.03 }, // 6 near diagonal
 ];
 
 /**
@@ -133,24 +133,25 @@ export function gridPositions(n, grid = GRID) {
 // ---------------------------------------------------------------------------
 
 /**
- * The vocabulary of a move, in normalised half-frames along the screen basis
- * (`dR` dolly in/out in world units, `dE` tilt in radians). A move is named
- * after what the *camera* does: `right` slides the camera right, which carries
- * the line left across the frame.
+ * The vocabulary of a move. v9 leans on the two axes that keep the line in
+ * shot: `dRoll` banks the camera around the view axis, `dYaw` swings it around
+ * the line — both rotate the picture without carrying it away. `dR` zooms and
+ * `dE` tilts; the four small pans survive only for the written opening and a
+ * little variety, at a fraction of their old magnitude.
  */
 const MOVES = {
-  down: { dx: 0, dy: -1 },
-  up: { dx: 0, dy: 1 },
-  right: { dx: 1, dy: 0 },
-  left: { dx: -1, dy: 0 },
-  downR: { dx: 0.72, dy: -0.72 },
-  downL: { dx: -0.72, dy: -0.72 },
-  upR: { dx: 0.72, dy: 0.72 },
-  upL: { dx: -0.72, dy: 0.72 },
+  rollL: { dRoll: -1 },
+  rollR: { dRoll: 1 },
+  yawL: { dYaw: -1 },
+  yawR: { dYaw: 1 },
   push: { dR: -1 },
   pull: { dR: 1 },
   crane: { dE: 1 },
   tilt: { dE: -1 },
+  down: { dx: 0, dy: -1 },
+  up: { dx: 0, dy: 1 },
+  right: { dx: 1, dy: 0 },
+  left: { dx: -1, dy: 0 },
 };
 const MOVE_NAMES = Object.keys(MOVES);
 const EASE_NAMES = ['ease_in_out_cubic', 'ease_out_quad', 'ease_in_quad', 'smooth'];
@@ -181,12 +182,29 @@ const OPENING_PREFIX = {
   ],
 };
 
+/**
+ * The bank and swing carried by each flight. A transition should read as the
+ * world turning underneath the line rather than the camera backing away from
+ * it: small yaw offsets stay inside the frame budget, the alternating signs
+ * keep consecutive flights from looking like the same gesture.
+ */
+const FLY_YAW = [0.05, -0.07, 0.03, -0.05, 0.06, -0.03, 0.04];
+const FLY_ROLL = [0.03, -0.04, 0.05, -0.02, 0.04, -0.05, 0.02];
+
 /** Roll one move: which axis, how far, which ease, and whether it leads. */
 function rollMove(r, kind) {
   const k = kind || MOVE_NAMES[Math.floor(r() * MOVE_NAMES.length)];
   const spec = MOVES[k];
   const mag =
-    spec.dR !== undefined ? 0.9 + r() * 1.7 : spec.dE !== undefined ? 0.05 + r() * 0.09 : 0.14 + r() * 0.26;
+    spec.dRoll !== undefined
+      ? 0.05 + r() * 0.11
+      : spec.dYaw !== undefined
+        ? 0.07 + r() * 0.13
+        : spec.dR !== undefined
+          ? 0.5 + r() * 1.0
+          : spec.dE !== undefined
+            ? 0.02 + r() * 0.05
+            : 0.06 + r() * 0.09;
   return {
     kind: k,
     mag,
@@ -247,32 +265,50 @@ export function assignChoreo(groupCounts) {
 }
 
 /** Does the line still fit the frame from this framing? */
-function framingFits(P, target, radius, elevation, yaw, hw, hh, th, aspect, fov) {
+function framingFits(P, target, radius, elevation, yaw, roll, hw, hh, th, aspect, fov) {
   const basis = cameraBasis({ radius, elevation, target, yaw });
-  const p = projectNDC(basis, P, fov, aspect);
-  if (!p) return false;
-  const fw = th * aspect * radius;
-  const fh = th * radius;
-  // 10% of the frame is kept back for the outline rim and the bloom bleed.
-  return Math.abs(p[0]) + hw / fw <= 0.9 && Math.abs(p[1]) + hh / fh <= 0.92;
+  // A rolled picture rotates the line's screen box; inflate the box by the
+  // roll's axis-aligned extent and test the four corners, because once the eye
+  // has swung off the line's axis the near edge projects further out than the
+  // centre would suggest.
+  const c = Math.abs(Math.cos(roll || 0));
+  const s = Math.abs(Math.sin(roll || 0));
+  const ew = hw * c + hh * s;
+  const eh = hh * c + hw * s;
+  for (const pt of [
+    [P[0] - ew, P[1] - eh, P[2]],
+    [P[0] + ew, P[1] - eh, P[2]],
+    [P[0] - ew, P[1] + eh, P[2]],
+    [P[0] + ew, P[1] + eh, P[2]],
+  ]) {
+    const p = projectNDC(basis, pt, fov, aspect);
+    if (!p) return false;
+    // 7% of the frame is kept back for the outline rim and the bloom bleed.
+    if (Math.abs(p[0]) > 0.93 || Math.abs(p[1]) > 0.94) return false;
+  }
+  return true;
 }
 
 /** Is the axis-aligned box around `P` (half extents `hw`/`hh`) on screen? */
 function boxOnFrame(state, P, hw, hh, fov, aspect) {
   const basis = cameraBasis(state);
+  const c = Math.abs(Math.cos(state.roll || 0));
+  const s = Math.abs(Math.sin(state.roll || 0));
+  const ew = hw * c + hh * s;
+  const eh = hh * c + hw * s;
   let behind = false;
   let any = false;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const c of [
-    [P[0] - hw, P[1] - hh, P[2]],
-    [P[0] + hw, P[1] - hh, P[2]],
-    [P[0] - hw, P[1] + hh, P[2]],
-    [P[0] + hw, P[1] + hh, P[2]],
+  for (const c2 of [
+    [P[0] - ew, P[1] - eh, P[2]],
+    [P[0] + ew, P[1] - eh, P[2]],
+    [P[0] - ew, P[1] + eh, P[2]],
+    [P[0] + ew, P[1] + eh, P[2]],
   ]) {
-    const p = projectNDC(basis, c, fov, aspect);
+    const p = projectNDC(basis, c2, fov, aspect);
     if (p === null) {
       behind = true;
       continue;
@@ -337,12 +373,12 @@ export function layoutField(lines, opts = {}) {
 
   // The tightest the frame ever gets. `fitWidth` is budgeted against this same
   // radius, so keeping every stop above it is what makes the budget valid.
+  // v9 keeps the rig within ±1.3 of the orbit's own radius *at that cue*, so
+  // a shot can zoom a little but never picks up the old wide-stage distance
+  // that made the line feel far away. `framingFits` still vetoes any stop
+  // that would push the line past the edge.
   const baseR = Number(camera.radius) || 14;
-  const rLo = Math.min(
-    baseR,
-    Number.isFinite(camera.movement?.radius_end) ? camera.movement.radius_end : baseR,
-  );
-  const rHi = Math.max(rmax, rLo + 4);
+  const rmaxCap = Number.isFinite(rmax) ? Math.min(rmax, baseR + 1.3) : baseR + 1.3;
 
   // World half-extents of each line, matching how Rust resolves `fit_width`:
   // the line shrinks to the budget, and its em box shrinks with it.
@@ -408,8 +444,10 @@ export function layoutField(lines, opts = {}) {
   if (groupLists) {
     // The last glyph of a line now lands with its group, so the exit scan has
     // to wait for the group rather than for the glyph it used to wait for.
+    // `groupCharTimes` also sweeps glyphs inside a group 35 ms apart.
     for (let i = 0; i < n; i++) {
-      revealEnd[i] = groupLists[i][groupLists[i].length - 1].t;
+      const g = groupLists[i][groupLists[i].length - 1];
+      revealEnd[i] = g.t + Math.max(0, g.i1 - g.i0 - 1) * 0.035;
     }
   }
 
@@ -418,7 +456,12 @@ export function layoutField(lines, opts = {}) {
   for (let i = 0; i < n; i++) {
     const stage = stages[i % stages.length];
     const base = evalOrbit(rig, cues[i]);
-    const radius = clamp(base.radius + stage.rAdd, rLo, rHi);
+    // The zoom budget rides with the orbit: ±1.3 around wherever the long
+    // dolly has the camera at this cue.
+    const lineBase = base.radius;
+    const rLo = Math.max(11.6, lineBase - 1.3);
+    const rHi = Math.max(rLo + 0.8, Math.min(rmaxCap, lineBase + 1.3));
+    const radius = clamp(lineBase + stage.rAdd, rLo, rHi);
     const elevation = clamp(base.elevation + stage.el, 0, 0.42);
     const fw = halfWAt(radius);
     const fh = halfHAt(radius);
@@ -439,6 +482,14 @@ export function layoutField(lines, opts = {}) {
       sx * fw * basis.right[2] + sy * fh * basis.up[2],
     ];
     const slot = [P[0] - off[0], P[1] - off[1], P[2] - off[2]];
+    let flyYaw = FLY_YAW[i % FLY_YAW.length];
+    let flyRoll = FLY_ROLL[i % FLY_ROLL.length];
+    // The slot was solved for the plain orbit; if the banked framing cannot
+    // hold the line, fly it level instead of shrinking the shot.
+    if (!framingFits(P, slot, radius, elevation, base.yaw + flyYaw, flyRoll, boxW[i], boxH[i], th, aspect, fov)) {
+      flyYaw = 0;
+      flyRoll = 0;
+    }
     stops.push({
       at: r3(flightAt[i]),
       duration: r3(flightDur[i]),
@@ -446,6 +497,8 @@ export function layoutField(lines, opts = {}) {
       target: slot.map(r3),
       radius: r3(radius),
       elevation: r3(elevation),
+      yaw: r3(flyYaw),
+      roll: r3(flyRoll),
     });
 
     let lastEnd = flightAt[i] + flightDur[i];
@@ -467,6 +520,8 @@ export function layoutField(lines, opts = {}) {
 
     let curR = radius;
     let curE = elevation;
+    let curYaw = flyYaw;
+    let curRoll = flyRoll;
     for (let k = 0; k < plan.length; k++) {
       const { m, on, kick } = plan[k];
       // A move spends a fraction of the gap to whatever comes next. `lead` > 0
@@ -484,24 +539,31 @@ export function layoutField(lines, opts = {}) {
       const dxN = (spec.dx || 0) * m.mag;
       const dyN = (spec.dy || 0) * m.mag;
       // Shrink the move until the line is still comfortably inside the frame
-      // at the new radius: a dolly in takes room away, a dolly out hands it
-      // back, and the outline rim needs ten percent either way.
+      // at the new framing: a dolly in takes room away, a swing turns the
+      // line's screen offset, and a bank widens its box. Six halvings are the
+      // budget; a move that still fails is dropped rather than forced.
       let scale = 1;
       let T = slot;
       let nR = curR;
       let nE = curE;
+      let nY = curYaw;
+      let nRo = curRoll;
       let ok = false;
       for (let tries = 0; tries < 6; tries++) {
         nR = clamp(curR + (spec.dR || 0) * m.mag * scale, rLo, rHi);
         nE = clamp(curE + (spec.dE || 0) * m.mag * scale, 0, 0.42);
+        nY = clamp(curYaw + (spec.dYaw || 0) * m.mag * scale, -0.26, 0.26);
+        nRo = clamp(curRoll + (spec.dRoll || 0) * m.mag * scale, -0.24, 0.24);
         const fw2 = halfWAt(nR);
         const fh2 = halfHAt(nR);
+        // With the eye swung around the line, the pan direction turns too.
+        const b2 = cameraBasis({ radius: nR, elevation: nE, target: [0, 0, 0], yaw: base.yaw + nY });
         T = [
-          slot[0] + dxN * scale * fw2 * basis.right[0] + dyN * scale * fh2 * basis.up[0],
-          slot[1] + dxN * scale * fw2 * basis.right[1] + dyN * scale * fh2 * basis.up[1],
-          slot[2] + dxN * scale * fw2 * basis.right[2] + dyN * scale * fh2 * basis.up[2],
+          slot[0] + dxN * scale * fw2 * b2.right[0] + dyN * scale * fh2 * b2.up[0],
+          slot[1] + dxN * scale * fw2 * b2.right[1] + dyN * scale * fh2 * b2.up[1],
+          slot[2] + dxN * scale * fw2 * b2.right[2] + dyN * scale * fh2 * b2.up[2],
         ];
-        if (framingFits(P, T, nR, nE, base.yaw, boxW[i], boxH[i], th, aspect, fov)) {
+        if (framingFits(P, T, nR, nE, base.yaw + nY, nRo, boxW[i], boxH[i], th, aspect, fov)) {
           ok = true;
           break;
         }
@@ -510,7 +572,13 @@ export function layoutField(lines, opts = {}) {
       if (!ok) continue;
       // A move that ended up nowhere is not worth a stop: the rig eases
       // stop-to-stop, and a degenerate stop only steals time from the real one.
-      if (nR === curR && nE === curE && Math.abs(T[0] - slot[0]) + Math.abs(T[1] - slot[1]) + Math.abs(T[2] - slot[2]) < 1e-3) {
+      if (
+        nR === curR &&
+        nE === curE &&
+        nY === curYaw &&
+        nRo === curRoll &&
+        Math.abs(T[0] - slot[0]) + Math.abs(T[1] - slot[1]) + Math.abs(T[2] - slot[2]) < 1e-3
+      ) {
         continue;
       }
       stops.push({
@@ -520,9 +588,13 @@ export function layoutField(lines, opts = {}) {
         target: T.map(r3),
         radius: r3(nR),
         elevation: r3(nE),
+        yaw: r3(nY),
+        roll: r3(nRo),
       });
       curR = nR;
       curE = nE;
+      curYaw = nY;
+      curRoll = nRo;
       lastEnd = at + dur;
     }
     lineEnds[i] = lastEnd;
@@ -537,6 +609,9 @@ export function layoutField(lines, opts = {}) {
       target: base.target.map(r3),
       radius: r3(base.radius),
       elevation: r3(base.elevation),
+      // The title card is never banked: the closing shot has to sit level.
+      yaw: 0,
+      roll: 0,
     });
   }
 

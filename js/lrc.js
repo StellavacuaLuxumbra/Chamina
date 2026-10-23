@@ -224,6 +224,44 @@ const PHRASE_CUTS = [
 export const PHRASE_CUT_COUNT = PHRASE_CUTS.length;
 
 /**
+ * Hand-worded segmentation for the fixed lyric corpus. Each entry is the line
+ * text mapped to its words, `|`-separated; a trailing space stays on the word
+ * before it so the pieces tile the whole string with no holes.
+ *
+ * The LRC carries one stamp per glyph and no word boundaries, and the random
+ * phrase cuts above can land six glyphs at once — which is exactly the stiff
+ * "block pop" the per-word reveal is meant to remove. The corpus is fixed, so
+ * the words are written down instead of guessed.
+ */
+const WORD_SPLIT_SPECS = new Map(
+  Object.entries({
+    '远离那些繁华悲伤 我们从此告别了过往': '远离|那些|繁华|悲伤 |我们|从此|告别了|过往',
+    '飞鸟张开时光翅膀 经历了无数风雨阻挡': '飞鸟|张开|时光|翅膀 |经历了|无数|风雨|阻挡',
+    '来到她身旁 谁的目光 停留在那个梦里的夜晚':
+      '来到|她|身旁 |谁的|目光 |停留|在|那个|梦里|的|夜晚',
+    '我们追随风的方向 遥远飞行地老天荒 别彷徨': '我们|追随|风的|方向 |遥远|飞行|地老天荒 |别|彷徨',
+    '在初遇的那地方 我们曾眷恋不已 梦想': '在|初遇|的|那地方 |我们|曾|眷恋|不已 |梦想',
+    '面对迷惘 也不要放弃了希望': '面对|迷惘 |也|不要|放弃了|希望',
+    '就像是盛开的花 对阳光不变的那信仰': '就像是|盛开|的|花 |对|阳光|不变的|那|信仰',
+    '天空里早已留下了 永恒的神话': '天空里|早已|留下了 |永恒的|神话',
+    '在夏天的操场 静静地眺望 在远方': '在|夏天|的|操场 |静静地|眺望 |在|远方',
+    '连绵不断 是回忆之间的海洋': '连绵|不断 |是|回忆|之间|的|海洋',
+    '穿过云端 是谁的天堂 在召唤': '穿过|云端 |是|谁的|天堂 |在|召唤',
+    '她在寻访 那沉睡千年的答案': '她|在|寻访 |那|沉睡|千年|的|答案',
+    '在告别的那地方 我们都无法放下的伤感':
+      '在|告别|的|那地方 |我们|都|无法|放下|的|伤感',
+    '挥一挥手留下的是美丽愿望': '挥一挥手|留下的|是|美丽|愿望',
+    '就像是逆风的帆 对海浪不屈的那坚强': '就像是|逆风|的|帆 |对|海浪|不屈|的|那|坚强',
+    '秋天的夜晚 静静地回想 在远方': '秋天|的|夜晚 |静静地|回想 |在|远方',
+    '挥去不散 我们怀念着的故乡': '挥去|不散 |我们|怀念着|的|故乡',
+    '在我们身旁': '在|我们|身旁',
+    '她的目光 飞翔在每个梦里的夜晚': '她的|目光 |飞翔|在|每个|梦里|的|夜晚',
+    '我们追随风的方向 遥远飞行地久天长 不返航':
+      '我们|追随|风的|方向 |遥远|飞行|地久天长 |不|返航',
+  }).map(([text, spec]) => [text, spec.split('|').map((w) => Array.from(w).length)]),
+);
+
+/**
  * Cuts written by hand instead of picked from the rhythm. The key is
  * `lineIndex:phraseIndex`.
  *
@@ -258,6 +296,20 @@ export function wordGroups(text, charTimes, seed = 0) {
   const n = Math.min(chars.length, charTimes.length);
   if (!n) return null;
   const out = [];
+  const spec = WORD_SPLIT_SPECS.get(text);
+  if (spec) {
+    let i = 0;
+    for (const len of spec) {
+      if (i >= n) break;
+      const end = Math.min(i + len, n);
+      out.push({ i0: i, i1: end, t: charTimes[i], kind: seed % PHRASE_CUTS.length });
+      i = end;
+    }
+    // A corpus line that grew past its table entry keeps the remainder on the
+    // last group rather than dropping glyphs on the floor.
+    if (i < n) out.push({ i0: i, i1: n, t: charTimes[i], kind: seed % PHRASE_CUTS.length });
+    return out.length ? out : null;
+  }
   let phraseStart = 0;
   let phraseIndex = 0;
   const flush = (phraseEnd) => {
@@ -286,17 +338,19 @@ export function wordGroups(text, charTimes, seed = 0) {
 }
 
 /**
- * Compress per-glyph stamps onto their group: every glyph in a group carries
- * the stamp of the group's first glyph, so the whole word lands on one beat.
- * The last stamp of the line only ever moves earlier, never later, so a
- * fade-out that waits on the last glyph keeps waiting long enough.
+ * Compress per-glyph stamps onto their group, then sweep the glyphs inside a
+ * group 35 ms apart. The word still lands on its first stamp, but its glyphs
+ * arrive as a soft left-to-right sweep instead of a single hard pop — that
+ * half-beat of spread is what keeps a word reveal from reading as a stamp
+ * press. The last glyph of the line only moves later, and `buildLyricTexts`
+ * waits on the last stamp for the fade-out, so nothing is cut short.
  */
 export function groupCharTimes(text, charTimes, seed = 0) {
   const groups = wordGroups(text, charTimes, seed);
   if (!groups) return charTimes;
   const out = charTimes.slice();
   for (const g of groups) {
-    for (let i = g.i0; i < g.i1; i++) out[i] = g.t;
+    for (let i = g.i0; i < g.i1; i++) out[i] = g.t + (i - g.i0) * 0.035;
   }
   return out;
 }

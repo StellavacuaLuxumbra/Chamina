@@ -106,6 +106,8 @@ const USAGE = `chamina lrc → scene
                          here; the held last line hands the frame over at
                          outro-at - 0.6 instead of riding out the whole outro
       --outro-text <t>   outro card text (default --title)
+--outro-subtitle <t>  outro card subtitle (default --subtitle)
+--outro-wish <t>   extra closing line, lands 15s after the outro card
       --outro-out <sec>  outro fade-out start (default duration - 1.5)
       --bg-look <name>   replace the flat colour with an animated sky that
                          drifts, glows and twinkles: ${Object.keys(LOOKS).join(' | ')}
@@ -176,9 +178,11 @@ function parseArgs(argv) {
     radius: null,
     keepCamera: false,
     keepOpen: false,
-    outroAt: null,
-    outroText: null,
-    outroOut: null,
+  outroAt: null,
+  outroText: null,
+  outroSubtitle: null,
+  outroWish: null,
+  outroOut: null,
     bgLook: null,
     bgCut: [],
     bgFade: 1.5,
@@ -248,6 +252,8 @@ function parseArgs(argv) {
       case '--keep-open': o.keepOpen = true; break;
       case '--outro-at': o.outroAt = Number(next()); break;
       case '--outro-text': o.outroText = next(); break;
+    case '--outro-subtitle': o.outroSubtitle = next(); break;
+    case '--outro-wish': o.outroWish = next(); break;
       case '--outro-out': o.outroOut = Number(next()); break;
       case '--bg-look': o.bgLook = next(); break;
       case '--bg-cut': o.bgCut.push(next()); break;
@@ -627,13 +633,27 @@ function main() {
       ? null
       : buildTitleBlock({
           ...cardCommon,
-          text: args.subtitle,
+          text: args.outroSubtitle ?? args.subtitle,
           size: titleSize / 3,
           y: -0.6,
           strength: args.strength * 0.7,
           fitWidth: fitWidth * 0.5,
           stagger: 0.03,
           startAt: r3(outroAt + 0.35),
+          outAt: outroOut,
+          fadeOut: 1.4,
+        }),
+    outroAt === null || !args.outroWish
+      ? null
+      : buildTitleBlock({
+          ...cardCommon,
+          text: args.outroWish,
+          size: titleSize / 4,
+          y: -1.7,
+          strength: args.strength * 0.6,
+          fitWidth: fitWidth * 0.45,
+          stagger: 0.05,
+          startAt: r3(outroAt + 15),
           outAt: outroOut,
           fadeOut: 1.4,
         }),
