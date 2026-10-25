@@ -469,3 +469,182 @@ test('grouping keeps the screen from sitting empty or doubling up', () => {
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// whip transitions (v10 `--roll-power`)
+// ---------------------------------------------------------------------------
+
+function birdWhipLayout(energy, whip = 1) {
+  return layoutField(birdLines(), {
+    camera: CAMERA,
+    duration: DURATION,
+    fov: FOV,
+    aspect: ASPECT,
+    size: 1.7,
+    fitWidth: FIT_WIDTH,
+    fadeIn: 0.3,
+    outroAt: 318,
+    titleOut: 15.34,
+    groups: 'auto',
+    whip,
+    energy,
+  });
+}
+
+test('quiet music keeps the plain flight everywhere but the opening', () => {
+  const lines = birdLines();
+  const quiet = lines.map(() => 0);
+  const { stops } = birdWhipLayout(quiet);
+  // The opening word whip is written by hand (line 0 always qualifies), so a
+  // quiet song still opens with its ninety-degree bank…
+  const openingWhips = stops.filter(
+    (s) => s.ease === 'ease_in_quad' && Math.abs(s.roll) > 0.45 && s.at < lines[1].time,
+  );
+  assert.ok(openingWhips.length >= 1, 'the opening whip is missing');
+  // …and from the second line's flight on, nothing differs from the
+  // whip-free layout.
+  const anchor = (list) =>
+    list.findIndex(
+      (s) =>
+        Math.abs(s.at + s.duration - lines[1].time) < 0.002 && s.ease !== 'ease_in_quad',
+    );
+  const a = anchor(stops);
+  const b = anchor(birdGroupedLayout().stops);
+  assert.ok(a > 0 && b > 0, 'cannot find the second line flight');
+  assert.deepEqual(stops.slice(a), birdGroupedLayout().stops.slice(b));
+});
+
+test('whips swing to ninety degrees, land level and unwind after the beat', () => {
+  const lines = birdLines();
+  const loud = lines.map(() => 1);
+  const { stops, exits } = birdWhipLayout(loud);
+
+  // Somewhere the camera really does swing the better part of 90°.
+  const swings = stops.filter((s) => s.ease === 'ease_in_quad' && Math.abs(s.roll) > 1.2);
+  assert.ok(swings.length >= 8, `only ${swings.length} flight swings`);
+  for (const s of swings) assert.ok(Math.abs(s.roll) <= Math.PI / 2 + 1e-6, 'swing past 90°');
+
+  // Consecutive banks — flight swings and in-phrase whips together, in the
+  // order they were placed — alternate direction, so no two transitions read
+  // as the same gesture.
+  const all = stops.filter((s) => s.ease === 'ease_in_quad' && Math.abs(s.roll) > 0.45);
+  assert.ok(all.length > swings.length, 'no in-phrase whips were placed at all');
+  for (let k = 1; k < all.length; k++) {
+    assert.ok(
+      Math.sign(all[k].roll) !== Math.sign(all[k - 1].roll),
+      `banks ${k - 1} (${all[k - 1].at}s) and ${k} (${all[k].at}s) bank the same way`,
+    );
+  }
+
+  // Every bank — flight swing or in-phrase whip — is followed by a stop that
+  // comes back level, and no stop ever starts inside another.
+  const banks = stops.filter((s) => s.ease === 'ease_in_quad' && Math.abs(s.roll) > 0.45);
+  for (let i = 0; i < banks.length; i++) {
+    const at = stops.indexOf(banks[i]);
+    const next = stops[at + 1];
+    assert.ok(next, 'a bank with no unwind after it');
+    assert.ok(Math.abs(next.roll) <= 0.26, `bank unwinds to ${next.roll}`);
+    assert.ok(next.at <= banks[i].at + banks[i].duration + 1.2, 'unwind trails its bank by over 1.2s');
+  }
+  for (let i = 1; i < stops.length; i++) {
+    assert.ok(
+      stops[i - 1].at + stops[i - 1].duration <= stops[i].at + 1e-6,
+      `stop ${i} starts before stop ${i - 1} finishes`,
+    );
+  }
+
+  // The screen invariants survive the whips: nothing doubles up, nothing
+  // blanks for longer than a flight.
+  const cues = lines.map((l) => l.time);
+  let peak = 0;
+  for (let t = 15; t < 318; t += 0.1) {
+    let n = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const out = exits[i] === null ? 367 : exits[i];
+      if (t >= cues[i] && t < out + 0.45) n++;
+    }
+    peak = Math.max(peak, n);
+  }
+  assert.ok(peak <= 2, `${peak} lines visible at once`);
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (exits[i] === null) continue;
+    const blank = cues[i + 1] - exits[i];
+    assert.ok(blank <= TRAVEL_MAX, `line ${i} leaves ${blank.toFixed(2)}s of empty screen`);
+  }
+});
+
+test('a whipped line settles level right after its cue', () => {
+  const lines = birdLines();
+  const loud = lines.map(() => 1);
+  const { stops } = birdWhipLayout(loud);
+  for (let i = 0; i < lines.length; i++) {
+    const cue = lines[i].time;
+    // The whip's landing (back_out) ends on the cue like any flight.
+    const land = stops.find(
+      (s) => s.ease === 'back_out' && Math.abs(s.at + s.duration - cue) < 0.002,
+    );
+    if (!land) continue;
+    const settle = stops.find((s) => Math.abs(s.at - (cue + 0.08)) < 0.01);
+    assert.ok(settle, `line ${i} lands a whip but never settles`);
+    assert.equal(settle.roll, 0);
+    // The rig is level again by the time the word after this line is due.
+    const next = i + 1 < lines.length ? lines[i + 1].time : 318;
+    assert.ok(
+      settle.at + settle.duration <= next + 1e-6,
+      `line ${i}'s settle runs past the next cue`,
+    );
+  }
+});
+
+test('energetic lines whip, quiet lines keep the plain flight', () => {
+  const lines = birdLines();
+  const energy = lines.map((l, i) => (i % 2 === 0 ? 1 : 0));
+  const { stops } = birdWhipLayout(energy);
+  const swings = stops.filter((s) => s.ease === 'ease_in_quad' && Math.abs(s.roll) > 1.2);
+  assert.ok(swings.length > 0, 'no swings at all with half the lines loud');
+  // Odd (quiet) lines never get a back_out landing.
+  for (let i = 1; i < lines.length; i += 2) {
+    const cue = lines[i].time;
+    const land = stops.find(
+      (s) => s.ease === 'back_out' && Math.abs(s.at + s.duration - cue) < 0.002,
+    );
+    assert.ok(!land, `quiet line ${i} was whipped`);
+  }
+});
+
+test('a forced line whips even against a quiet meter', () => {
+  const lines = birdLines();
+  const quiet = lines.map(() => 0);
+  const opts = {
+    camera: CAMERA,
+    duration: DURATION,
+    fov: FOV,
+    aspect: ASPECT,
+    size: 1.7,
+    fitWidth: FIT_WIDTH,
+    fadeIn: 0.3,
+    outroAt: 318,
+    titleOut: 15.34,
+    groups: 'auto',
+    whip: 1,
+    energy: quiet,
+  };
+  const hook = lines.findIndex((l) => l.text.includes('飞鸟'));
+  assert.ok(hook > 0, 'cannot find the chorus hook line');
+  const { stops } = layoutField(lines, {
+    ...opts,
+    whipForce: lines.map((l) => l.text.includes('飞鸟')),
+  });
+  // Every hook line lands on a back_out whip…
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].text.includes('飞鸟')) continue;
+    const land = stops.find(
+      (s) => s.ease === 'back_out' && Math.abs(s.at + s.duration - lines[i].time) < 0.002,
+    );
+    assert.ok(land, `hook line ${i} was not whipped`);
+  }
+  // …and the change is real: without the force the same quiet song laid out
+  // differently.
+  const baseline = layoutField(lines, opts).stops;
+  assert.notDeepEqual(stops, baseline, 'force-whip changed nothing');
+});

@@ -24,6 +24,8 @@ import {
   hitEnvelope,
   jitterNoise,
   shakeWeight,
+  charDelay,
+  smoothstep,
 } from './anim.mjs';
 
 // Debug flags (set through `render.js --url "a=1&b=1"`):
@@ -33,15 +35,21 @@ import {
 //   noparticles, nolights, text=<n>   (text=<n> keeps only that line)
 //   nooutline    skip the inverted-hull rim (A/B its look)
 //   box        add a 3x3x3 green reference cube at the origin (off by default)
+//   norings / nobars / nosparks / nostreaks   A/B the audio-visualiser pieces
 const QS = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
 const flag = (k) => QS.has(k);
 const DEBUG = flag('debug');
 const FRONT = DEBUG || flag('front');
 const NOPOST = DEBUG || flag('nopost');
 const NOPARTICLES = DEBUG || flag('noparticles');
-// Outro audio visualiser: on when render.js was given --audio-env, which also
-// serves /audio_env.json and appends audioenv=1 to the page query.
+// Audio visualisers (intro ring, outro ring, spectrum bars, cue sparks,
+// roll streaks): on when render.js was given --audio-env, which also serves
+// /audio_env.json and appends audioenv=1 to the page query.
 const AUDIO_ENV = QS.get('audioenv') === '1';
+const NORINGS = flag('norings');
+const NOBARS = flag('nobars');
+const NOSPARKS = flag('nosparks') || NOPARTICLES;
+const NOSTREAKS = flag('nostreaks') || NOPARTICLES;
 const NOLIGHTS = DEBUG || flag('nolights');
 const BOX = DEBUG ? false : flag('box');
 const NOOUTLINE = flag('nooutline');
@@ -89,6 +97,15 @@ const state = {
   // Filled in by updateCamera so the cue punch can push along the view axis.
   camTarget: [0, 1, 0],
   lastHit: 0,
+  // Camera roll this instant (stops + shake), so a landing line's glyphs can
+  // follow the bank in and settle level as the camera does.
+  camRoll: 0,
+  // Mean band energy of the current frame (audio-env scenes only). The cue
+  // punch and the flash spend themselves with the music instead of flat out.
+  energyNow: 0.75,
+  // Audio visualisers built when --audio-env was given.
+  env: null,
+  viz: null,
 };
 
 // scene_data.json stores vertex data as [[x, y, z], ...]; BufferAttribute wants
@@ -217,6 +234,14 @@ function buildText(spec, index) {
     geo.setIndex(c.indices);
     geo.computeBoundingSphere();
 
+    // The moment this glyph lights up: the fade's own delay grid, word timing
+    // included. Static per glyph, so it is resolved once here for the
+    // follow-the-camera roll the renderer applies while a line lands.
+    const fadeA = (spec.animations || []).find((a) => a.type === 'fade');
+    const landsAt = fadeA
+      ? charDelay(spec.char_times || null, fadeA.start_at, fadeA.stagger, c.idx)
+      : null;
+
     const material = makeMaterial(spec.material);
     const mesh = new THREE.Mesh(geo, material);
     mesh.matrixAutoUpdate = true;
@@ -270,6 +295,7 @@ function buildText(spec, index) {
       // Word timing shared by every animation of this line; `null` for an
       // ordinary LRC, which then reads its delays off the uniform grid.
       charTimes: spec.char_times || null,
+      landsAt,
       basePosition: new THREE.Vector3(
         c.base_position[0],
         c.base_position[1],
@@ -385,32 +411,48 @@ function buildParticles(meta) {
   state.particles = points;
 }
 
-// Outro spectrum ring: 64 frequency bands laid out clockwise around a circle
-// behind the closing card, each band a short radial run of points that lights
-// up as far as its energy reaches. Driven per-frame from the precomputed
-// envelope (js/audio-env.mjs); the shape itself never changes, only the
-// uniforms, so seeking stays deterministic.
-async function buildSpectrumRing(meta, texts) {
-  const res = await fetch('/audio_env.json');
-  if (!res.ok) throw new Error(`cannot load audio_env.json: ${res.status}`);
-  const env = await res.json();
-  const B = env.bands;
+// ---------------------------------------------------------------------------
+// audio visualisers (intro ring, outro ring, spectrum bars, cue sparks, roll
+// streaks) — driven per-frame from the precomputed envelope (js/audio-env.mjs)
+// ---------------------------------------------------------------------------
 
-  let ringStart = Infinity;
-  for (const tx of texts) {
-    const a = tx.animations && tx.animations[0];
-    if (a && a.start_at > 60 && a.start_at < ringStart) ringStart = a.start_at;
-  }
-  if (!Number.isFinite(ringStart)) ringStart = 0;
+/** Window envelope: 0 outside, ramping in over `fadeIn`, out over `fadeOut`. */
+function ringWindow(t, w) {
+  if (t < w.start || t > w.end) return 0;
+  let f = 1;
+  if (t < w.start + w.fadeIn) f = (t - w.start) / w.fadeIn;
+  const fo = w.end - w.fadeOut;
+  if (t > fo) f = Math.min(f, (w.end - t) / w.fadeOut);
+  return Math.max(0, Math.min(1, f));
+}
 
-  const CX = 0;
-  const CY = 0.8;
-  const CZ = -1.2;
-  const R0 = 4.0;
-  const R1 = 5.6;
+/**
+ * Spectrum ring: 64 frequency bands laid out clockwise, each a short radial
+ * run of points that lights up as far as its energy reaches. v10 colours it
+ * with a rainbow that rides the band index and drifts with time, computed in
+ * the vertex shader (per point, not per pixel — SwiftShader ground to a halt
+ * the last time per-pixel noise entered the chain). The shape never changes,
+ * only uniforms, so seeking stays deterministic.
+ */
+function makeSpectrumRing({
+  center,
+  r0,
+  r1,
+  tilt = 0,
+  window,
+  hueSpeed = 0.045,
+  spin = 0.06,
+  p0 = 0.9,
+  p1 = 2.2,
+  opacity = 0.95,
+}) {
+  const B = 64;
   const RADIAL = 7;
   const N = B * RADIAL;
 
+  // Geometry sits around the local origin; the object's own transform carries
+  // it to its place in the world (and its tilt, in the intro ring's case), so
+  // the shader's idle spin can keep rotating around the ring's own centre.
   const pos = new Float32Array(N * 3);
   const aBand = new Float32Array(N);
   const aK = new Float32Array(N);
@@ -420,10 +462,10 @@ async function buildSpectrumRing(meta, texts) {
     const dy = Math.sin(ang);
     for (let k = 0; k < RADIAL; k++) {
       const i = b * RADIAL + k;
-      const r = R0 + ((R1 - R0) * k) / (RADIAL - 1);
-      pos[i * 3 + 0] = CX + dx * r;
-      pos[i * 3 + 1] = CY + dy * r;
-      pos[i * 3 + 2] = CZ;
+      const r = r0 + ((r1 - r0) * k) / (RADIAL - 1);
+      pos[i * 3 + 0] = dx * r;
+      pos[i * 3 + 1] = dy * r;
+      pos[i * 3 + 2] = 0;
       aBand[i] = b;
       aK[i] = k;
     }
@@ -433,14 +475,17 @@ async function buildSpectrumRing(meta, texts) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aBand', new THREE.BufferAttribute(aBand, 1));
   geo.setAttribute('aK', new THREE.BufferAttribute(aK, 1));
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(CX, CY, CZ), R1 + 1);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), r1 + 1);
 
   const uniforms = {
     uBand: { value: new Float32Array(B) },
     uFade: { value: 0 },
     uTime: { value: 0 },
-    uColor: { value: new THREE.Color('#ffd27a') },
-    uOpacity: { value: 0.95 },
+    uHueSpeed: { value: hueSpeed },
+    uSpin: { value: spin },
+    uP0: { value: p0 },
+    uP1: { value: p1 },
+    uOpacity: { value: opacity },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -453,13 +498,25 @@ async function buildSpectrumRing(meta, texts) {
       uniform float uBand[64];
       uniform float uFade;
       uniform float uTime;
+      uniform float uHueSpeed;
+      uniform float uSpin;
+      uniform float uP0;
+      uniform float uP1;
       varying float vGlow;
+      varying vec3 vColor;
+
+      vec3 hsv2rgb(vec3 c) {
+        vec3 K = vec3(1.0, 2.0 / 3.0, 1.0 / 3.0);
+        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - 3.0);
+        return c.z * mix(K.xxx, clamp(p - K.x, 0.0, 1.0), c.y);
+      }
+
       void main() {
         // Slow idle rotation keeps the ring alive once the track has faded.
-        float ang = uTime * 0.06;
-        vec3 c = vec3(cos(ang), sin(ang), 0.0);
-        vec3 rel = position - vec3(0.0, 0.8, 0.0);
-        vec3 p = vec3(0.0, 0.8, 0.0) + vec3(rel.x * c.x - rel.y * c.y, rel.x * c.y + rel.y * c.x, rel.z);
+        float ang = uTime * uSpin;
+        float ca = cos(ang);
+        float sa = sin(ang);
+        vec3 p = vec3(position.x * ca - position.y * sa, position.x * sa + position.y * ca, position.z);
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mv;
         float e = uBand[int(aBand + 0.5)];
@@ -467,23 +524,195 @@ async function buildSpectrumRing(meta, texts) {
         float lit = smoothstep(aK - 0.45, aK + 0.05, lvl);
         // Shimmer gives every point a lazy sine so the quiet tail still moves.
         float shim = 0.5 + 0.5 * sin(uTime * 1.7 + aBand * 1.53);
-        float size = mix(0.9, 2.2, lit) * (0.75 + 0.45 * e);
+        float size = mix(uP0, uP1, lit) * (0.75 + 0.45 * e);
         gl_PointSize = min(size * (260.0 / max(-mv.z, 0.001)), 44.0);
         vGlow = 0.16 + 0.84 * lit * (0.72 + 0.28 * shim);
         vGlow *= smoothstep(2.0, 7.0, -mv.z);
         vGlow *= uFade;
+        // The rainbow: hue rides the band index and drifts with time, so the
+        // ring never shows the same colour twice; lit points run brighter.
+        float hue = fract(aBand / 64.0 + uTime * uHueSpeed);
+        vColor = hsv2rgb(vec3(hue, 0.85, 0.30 + 0.70 * lit));
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 uColor;
       uniform float uOpacity;
       varying float vGlow;
+      varying vec3 vColor;
       void main() {
         float d = length(gl_PointCoord - vec2(0.5));
         float a = smoothstep(0.5, 0.0, d);
         a = a * a * vGlow * uOpacity;
         if (a <= 0.001) discard;
-        gl_FragColor = vec4(uColor * a * 2.0, a);
+        gl_FragColor = vec4(vColor * a * 2.2, a);
+      }
+    `,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  points.position.set(center[0], center[1], center[2]);
+  points.rotation.x = tilt;
+  points.visible = false;
+  state.scene.add(points);
+  return { points, uniforms, window };
+}
+
+/**
+ * 3D spectrum bars: an instanced crown of 64 boxes just outside the outro
+ * ring, each stretching with its band and coloured by the same drifting
+ * rainbow. The whole crown revolves slowly, so the bars sweep past the
+ * closing card like a dial of light.
+ */
+function makeSpectrumBars({ center, r0 = 6.05, tilt = -0.1, maxLen = 2.6, window }) {
+  const B = 64;
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  // Origin at the inner end, so `scale.x` grows the bar outwards.
+  geo.translate(0.5, 0, 0);
+  const mat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, B);
+  mesh.frustumCulled = false;
+  const group = new THREE.Group();
+  group.add(mesh);
+  group.position.set(center[0], center[1], center[2]);
+  group.rotation.x = tilt;
+  group.visible = false;
+  state.scene.add(group);
+
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  for (let b = 0; b < B; b++) {
+    dummy.position.set(0, 0, 0);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(0.22, 0.11, 0.11);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(b, dummy.matrix);
+    mesh.setColorAt(b, color.setHSL(b / B, 0.85, 0.4));
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  return { mesh, group, r0, maxLen, window, dummy, color };
+}
+
+function updateSpectrumBars(t, bars, bands) {
+  const fade = ringWindow(t, bars.window);
+  bars.group.visible = fade > 0.003;
+  if (fade <= 0.003) return;
+  const { mesh, dummy, color, r0, maxLen } = bars;
+  for (let b = 0; b < 64; b++) {
+    const v = bands[b];
+    const ang = -Math.PI / 2 + (b / 64) * Math.PI * 2 + t * 0.05;
+    dummy.position.set(Math.cos(ang) * r0, Math.sin(ang) * r0, 0);
+    dummy.rotation.set(0, 0, ang);
+    dummy.scale.set(0.22 + v * maxLen, 0.11, 0.11);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(b, dummy.matrix);
+    color.setHSL(((b / 64) + t * 0.02) % 1, 0.85, 0.22 + 0.5 * v);
+    mesh.setColorAt(b, color);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.material.opacity = 0.9 * fade;
+}
+
+/**
+ * Cue sparks: a small burst of dust per text block, tinted with the block's
+ * own colour (the lyric palette rides through here), released the moment it
+ * lands and gone again in about a second. The whole life cycle lives in the
+ * shader from `uT` and each point's stamp, so no state is carried between
+ * frames and seeking is exact.
+ */
+function makeCueSparks(texts) {
+  const PER = 14;
+  const blocks = [];
+  for (let i = 0; i < texts.length; i++) {
+    const tx = texts[i];
+    const fade = tx.animations && tx.animations.find((a) => a.type === 'fade');
+    if (!fade || !Number.isFinite(fade.start_at)) continue;
+    const pos = tx.position || [0, 0, 0];
+    const em = Number(tx.total_width_em) || 0;
+    const size = Number(tx.size) || 1;
+    blocks.push({
+      cue: fade.start_at,
+      pos,
+      hw: Math.min(9, Math.max(1, (em * size) / 2)),
+      seed: i * 131 + 7,
+      col: new THREE.Color((tx.material && tx.material.color) || '#ffffff'),
+    });
+  }
+  const n = blocks.length * PER;
+  const pos = new Float32Array(n * 3);
+  const aCue = new Float32Array(n);
+  const aColor = new Float32Array(n * 3);
+  const aSeed = new Float32Array(n * 3);
+  let w = 0;
+  for (const b of blocks) {
+    const r = mulberry32(b.seed >>> 0);
+    for (let k = 0; k < PER; k++) {
+      pos[w * 3 + 0] = b.pos[0] + (r() * 2 - 1) * b.hw * 1.05;
+      pos[w * 3 + 1] = b.pos[1] + (r() * 2 - 1) * 0.85;
+      pos[w * 3 + 2] = b.pos[2] + (r() - 0.5) * 0.6;
+      aCue[w] = b.cue + r() * 0.15;
+      aColor[w * 3 + 0] = b.col.r;
+      aColor[w * 3 + 1] = b.col.g;
+      aColor[w * 3 + 2] = b.col.b;
+      aSeed[w * 3 + 0] = Math.PI * (0.15 + 0.7 * r()); // drift mostly upward
+      aSeed[w * 3 + 1] = 0.5 + r() * 1.6;
+      aSeed[w * 3 + 2] = 2.0 + r() * 4.0;
+      w++;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aCue', new THREE.BufferAttribute(aCue, 1));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(aColor, 3));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 3));
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 20, 0), 160);
+
+  const uniforms = { uT: { value: 0 }, uOpacity: { value: 0.9 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      attribute float aCue;
+      attribute vec3 aColor;
+      attribute vec3 aSeed;
+      uniform float uT;
+      varying vec3 vColor;
+      varying float vA;
+      void main() {
+        float u = (uT - aCue) / 1.15;
+        float alive = step(0.0, u) * (1.0 - step(1.0, u));
+        float e = 1.0 - u;
+        e = e * e;
+        vec3 p = position + vec3(cos(aSeed.x), sin(aSeed.x), 0.0) * (aSeed.y * u * 1.5);
+        p.y += u * 0.35;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        float size = aSeed.z * (0.45 + 0.55 * e);
+        gl_PointSize = alive > 0.0 ? min(size * (240.0 / max(-mv.z, 0.001)), 26.0) : 0.0;
+        vA = alive * e * e;
+        vColor = aColor;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity;
+      varying vec3 vColor;
+      varying float vA;
+      void main() {
+        if (vA <= 0.004) discard;
+        float d = length(gl_PointCoord - vec2(0.5));
+        float a = smoothstep(0.5, 0.0, d);
+        a = a * a * vA * uOpacity;
+        if (a <= 0.001) discard;
+        gl_FragColor = vec4(vColor * a * 2.0, a);
       }
     `,
   });
@@ -491,12 +720,173 @@ async function buildSpectrumRing(meta, texts) {
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
   state.scene.add(points);
+  return { points, uniforms };
+}
+
+/**
+ * Roll streaks: a quiet fan of tangential speed lines around the camera's
+ * look-at, invisible until the camera actually banks (a whip transition),
+ * then swinging with the roll. This is the drawn element that makes a 90°
+ * transition read as motion rather than as a tilt.
+ */
+function makeStreaks(meta) {
+  const r = mulberry32(((meta.seed >>> 0) ^ 0x9e3779b9) >>> 0);
+  const N = 26;
+  const pos = new Float32Array(N * 4 * 3);
+  const aT = new Float32Array(N * 4);
+  const aC = new Float32Array(N * 4);
+  const index = [];
+  for (let i = 0; i < N; i++) {
+    const th = (i / N) * Math.PI * 2 + (r() - 0.5) * 0.35;
+    const rad = 3.6 + r() * 5.2;
+    const len = 1.6 + r() * 2.8;
+    const wid = 0.022 + r() * 0.035;
+    const cx = Math.cos(th) * rad;
+    const cy = Math.sin(th) * rad;
+    const tx = -Math.sin(th);
+    const ty = Math.cos(th);
+    const nx = Math.cos(th);
+    const ny = Math.sin(th);
+    const cornersOf = (sx, sy) => [
+      cx + tx * len * 0.5 * sx + nx * wid * 0.5 * sy,
+      cy + ty * len * 0.5 * sx + ny * wid * 0.5 * sy,
+    ];
+    const quad = [cornersOf(-1, -1), cornersOf(1, -1), cornersOf(1, 1), cornersOf(-1, 1)];
+    const tvals = [-1, 1, 1, -1];
+    const base = i * 4;
+    for (let k = 0; k < 4; k++) {
+      pos.set(quad[k], (base + k) * 3);
+      aT[base + k] = tvals[k];
+      aC[base + k] = (rad - 3.6) / 5.2;
+    }
+    index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aT', new THREE.BufferAttribute(aT, 1));
+  geo.setAttribute('aC', new THREE.BufferAttribute(aC, 1));
+  geo.setIndex(index);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 12);
+
+  const uniforms = { uOpacity: { value: 0 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      attribute float aT;
+      attribute float aC;
+      varying float vT;
+      varying float vC;
+      void main() {
+        vT = aT;
+        vC = aC;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity;
+      varying float vT;
+      varying float vC;
+      void main() {
+        float a = 1.0 - abs(vT);
+        a = a * a * uOpacity * (0.3 + 0.5 * vC);
+        if (a <= 0.003) discard;
+        vec3 col = mix(vec3(0.82, 0.93, 1.0), vec3(0.45, 0.75, 1.0), vC);
+        gl_FragColor = vec4(col * a * 1.6, a);
+      }
+    `,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  const group = new THREE.Group();
+  group.add(mesh);
+  state.scene.add(group);
+  return { mesh, group, uniforms };
+}
+
+/**
+ * Assemble every audio-driven piece. One fetch of the envelope feeds them
+ * all; each carries its own visibility window, so the intro ring lives with
+ * the title card, the outro ring + bars with the closing card, and the
+ * sparks and streaks ride the whole song.
+ */
+async function buildAudioViz(meta, texts) {
+  const res = await fetch('/audio_env.json');
+  if (!res.ok) throw new Error(`cannot load audio_env.json: ${res.status}`);
+  const env = await res.json();
   state.env = env;
-  state.envUniforms = uniforms;
-  state.envWindow = {
-    start: ringStart,
-    dur: meta.total_frames / meta.fps,
+
+  const dur = meta.total_frames / meta.fps;
+
+  // The outro window opens on the closing card's cue.
+  let outroStart = Infinity;
+  for (const tx of texts) {
+    const a = tx.animations && tx.animations[0];
+    if (a && a.start_at > 60 && a.start_at < outroStart) outroStart = a.start_at;
+  }
+  if (!Number.isFinite(outroStart)) outroStart = 0;
+  const outroWindow = { start: outroStart, fadeIn: 3, end: dur, fadeOut: 2 };
+
+  // The intro window closes just before the first lyric, handing the frame
+  // over together with the title card.
+  const cues = texts
+    .map((tx) => tx.animations && tx.animations[0] && tx.animations[0].start_at)
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => a - b);
+  const firstLyric = cues.find((c) => c > 8) ?? Math.min(dur * 0.1, 16.5);
+  const introWindow = {
+    start: 2.0,
+    fadeIn: 1.6,
+    end: Math.max(6, firstLyric - 0.7),
+    fadeOut: 1.3,
   };
+
+  const viz = { rings: [], bars: null, sparks: null, streaks: null, bands: new Float32Array(64) };
+
+  if (!NORINGS) {
+    viz.rings.push(
+      makeSpectrumRing({
+        center: [0, 0.8, -1.2],
+        r0: 4.0,
+        r1: 5.6,
+        window: outroWindow,
+      }),
+    );
+    // The opening ring: smaller, behind the title card and leaning back a
+    // touch, so it reads as a halo rather than a dial.
+    viz.rings.push(
+      makeSpectrumRing({
+        center: [0, 0.55, -1.9],
+        r0: 2.9,
+        r1: 4.3,
+        tilt: -0.15,
+        window: introWindow,
+        hueSpeed: 0.03,
+        spin: 0.05,
+        p0: 0.7,
+        p1: 1.7,
+        opacity: 0.8,
+      }),
+    );
+  }
+  if (!NOBARS) {
+    viz.bars = makeSpectrumBars({
+      center: [0, 0.8, -1.4],
+      r0: 6.05,
+      tilt: -0.1,
+      maxLen: 2.6,
+      window: outroWindow,
+    });
+  }
+  if (!NOSPARKS) viz.sparks = makeCueSparks(texts);
+  if (!NOSTREAKS) viz.streaks = makeStreaks(meta);
+  state.viz = viz;
 }
 
 /**
@@ -746,11 +1136,23 @@ function updateCamera(t) {
   // always has.
   if (state.particles) {
     const base = o.target || [0, 0, 0];
-    state.particles.position.set(
+    state.followOffset = [
       (rig.target[0] - base[0]) * 0.75,
       (rig.target[1] - base[1]) * 0.75,
       (rig.target[2] - base[2]) * 0.75,
+    ];
+    state.particles.position.set(
+      state.followOffset[0],
+      state.followOffset[1],
+      state.followOffset[2],
     );
+  } else {
+    const base = o.target || [0, 0, 0];
+    state.followOffset = [
+      (rig.target[0] - base[0]) * 0.75,
+      (rig.target[1] - base[1]) * 0.75,
+      (rig.target[2] - base[2]) * 0.75,
+    ];
   }
   let tx = rig.target[0];
   let ty = rig.target[1];
@@ -806,13 +1208,14 @@ function updateCamera(t) {
 
   // Cue punch: slide the camera toward the look-at point so every line lands
   // with a little forward weight. Displacing only the eye keeps the framing,
-  // which is what a "push" reads as rather than a zoom.
+  // which is what a "push" reads as rather than a zoom. The push spends
+  // itself with the music: a quiet passage gets a touch, a loud one the step.
   if (hit > 0 && fx.punch) {
     const dx = tx - px;
     const dy = ty - py;
     const dz = tz - pz;
     const dl = Math.hypot(dx, dy, dz) || 1;
-    const step = fx.punch * hit;
+    const step = fx.punch * hit * (0.55 + 0.45 * state.energyNow);
     px += (dx / dl) * step;
     py += (dy / dl) * step;
     pz += (dz / dl) * step;
@@ -821,6 +1224,9 @@ function updateCamera(t) {
   state.camera.position.set(px, py, pz);
   state.camera.lookAt(tx, ty, tz);
   if (roll !== 0) state.camera.rotateZ(roll);
+  // The bank the picture is carrying this instant, stops + shake together —
+  // landing glyphs follow it in and settle level as it unwinds.
+  state.camRoll = roll;
 }
 
 // ---------------------------------------------------------------------------
@@ -847,16 +1253,79 @@ function applyBackdrop(t) {
   if (state.fxPass) {
     const u = state.fxPass.material.uniforms;
     u.uHit.value = state.lastHit;
-    u.uFlash.value = (state.fx.flash || 0) * state.lastHit;
+    // Like the camera punch, the flash rides the music's energy instead of
+    // firing at full strength through a whisper-quiet cue.
+    u.uFlash.value =
+      (state.fx.flash || 0) * state.lastHit * (0.45 + 0.55 * state.energyNow);
     u.uTime.value = t;
   }
 }
 
+/** Read the envelope for this instant: bands for every visualiser, the bass
+ *  for the dust cloud and the mean energy the punch / flash spend. Runs
+ *  before the camera moves so a seek is exact, never a frame stale. */
+function updateEnvFrame(t) {
+  const env = state.env;
+  const viz = state.viz;
+  const fi = Math.min(env.frames - 1, Math.max(0, Math.round(t * env.fps)));
+  const row = env.data[fi] || [];
+  const bands = viz.bands;
+  let bass = 0;
+  let energy = 0;
+  for (let i = 0; i < 64; i++) {
+    const v = row.length
+      ? row[Math.min(row.length - 1, Math.floor((i / 64) * row.length))]
+      : 0;
+    bands[i] = v;
+    if (i < 8) bass += v;
+    energy += v;
+  }
+  bass /= 8;
+  energy /= 64;
+  state.energyNow = energy;
+  for (const r of viz.rings) r.uniforms.uBand.value.set(bands);
+
+  // The dust cloud breathes with the bass wherever a ring is on screen;
+  // outside both windows this is exactly its constructed 0.9.
+  let breath = 0;
+  for (const r of viz.rings) breath = Math.max(breath, ringWindow(t, r.window));
+  if (state.particleUniforms) {
+    state.particleUniforms.uOpacity.value = 0.9 * (1 + 0.28 * bass * breath);
+  }
+}
+
+function updateViz(t) {
+  const v = state.viz;
+  for (const r of v.rings) {
+    const fade = ringWindow(t, r.window);
+    r.uniforms.uFade.value = fade;
+    r.uniforms.uTime.value = t;
+    r.points.visible = fade > 0.003;
+  }
+  if (v.bars) updateSpectrumBars(t, v.bars, v.bands);
+  if (v.sparks) v.sparks.uniforms.uT.value = t;
+  if (v.streaks) {
+    // The streaks only exist while the camera is actually banked, and swing
+    // with the roll, which is what makes a whip read as speed lines.
+    const roll = state.camRoll;
+    const op = Math.min(1, Math.max(0, (Math.abs(roll) - 0.22) / 0.9)) * 0.85;
+    v.streaks.mesh.visible = op > 0.01;
+    if (op > 0.01) {
+      const fo = state.followOffset || [0, 0, 0];
+      v.streaks.group.position.set(fo[0], fo[1], fo[2] - 0.7);
+      v.streaks.mesh.rotation.z = roll * 0.92;
+      v.streaks.uniforms.uOpacity.value = op;
+    }
+  }
+}
+
 function setFrame(t) {
+  if (state.env && state.viz) updateEnvFrame(t);
   updateCamera(t);
   applyBackdrop(t);
 
   const tmpQ = new THREE.Quaternion();
+  const followRoll = state.camRoll;
   for (const c of state.chars) {
     const st = evalAll(c.animations, t, c.idx, c.size, c.charTimes);
     c.mesh.position.set(
@@ -866,6 +1335,17 @@ function setFrame(t) {
     );
     tmpQ.set(st.rot[0], st.rot[1], st.rot[2], st.rot[3]);
     c.mesh.quaternion.copy(c.baseRotation).multiply(tmpQ);
+    // A line landing under a banked camera enters along the bank: for the
+    // first beat of its life each glyph carries the camera's roll and then
+    // settles level as the camera does. That is what ties a whip transition
+    // to the word it delivers — the text arrives *with* the rotation.
+    if (followRoll !== 0 && c.landsAt !== null && st.alpha > 0.003) {
+      const u = t - c.landsAt;
+      if (u > -0.02 && u < 1.05) {
+        const w = u <= 0.45 ? 1 : 1 - smoothstep((u - 0.45) / 0.6);
+        if (w > 0.001) c.mesh.rotateZ(followRoll * w);
+      }
+    }
     c.mesh.scale.set(
       c.baseScale.x * st.scale,
       c.baseScale.y * st.scale,
@@ -882,31 +1362,7 @@ function setFrame(t) {
 
   if (state.particleUniforms) state.particleUniforms.uTime.value = t;
 
-  // Spectrum ring + particle breathing, only when an envelope was provided.
-  // Outside the outro window uFade is 0 and the base particle opacity is
-  // exactly its constructed 0.9, so lyric sections are untouched.
-  if (state.env) {
-    const env = state.env;
-    const fi = Math.min(env.frames - 1, Math.max(0, Math.round(t * env.fps)));
-    const row = env.data[fi];
-    const bandArr = state.envUniforms.uBand.value;
-    let bass = 0;
-    for (let i = 0; i < bandArr.length; i++) {
-      bandArr[i] = row[i];
-      if (i < 8) bass += row[i];
-    }
-    bass /= 8;
-
-    const w = state.envWindow;
-    let fade = 1;
-    if (t < w.start) fade = 0;
-    else if (t < w.start + 3) fade = (t - w.start) / 3;
-    const outFrom = w.dur - 2;
-    if (t > outFrom) fade = Math.min(fade, Math.max(0, (w.dur - t) / 2));
-    state.envUniforms.uFade.value = fade;
-    state.envUniforms.uTime.value = t;
-    state.particleUniforms.uOpacity.value = 0.9 * (1 + 0.28 * bass * fade);
-  }
+  if (state.viz) updateViz(t);
 
   if (NOPOST) state.renderer.render(state.scene, state.camera);
   else state.composer.render();
@@ -969,7 +1425,7 @@ async function main() {
     buildText(data.texts[i], i);
   }
   buildParticles(meta);
-  if (AUDIO_ENV) await buildSpectrumRing(meta, data.texts);
+  if (AUDIO_ENV) await buildAudioViz(meta, data.texts);
   buildComposer(meta, w, h);
 
   updateCamera(0);

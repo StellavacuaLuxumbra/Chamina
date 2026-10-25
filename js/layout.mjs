@@ -333,6 +333,14 @@ function boxOnFrame(state, P, hw, hh, fov, aspect) {
  *   lines only — blanks already filtered, in scene order
  * @param {object} opts `camera` (orbit, no stops), `duration`, `fov`,
  *   `aspect`, `size`, `fitWidth`, `fadeIn`, `outroAt`, `titleOut`
+ * @param {number} [opts.whip] 0..1 — how hard transitions may bank the camera.
+ *   A whipped flight swings the roll to ±90° mid-flight and unwinds with a
+ *   back-out ease onto the cue, so the world whips under the incoming line
+ *   instead of drifting; the line's own glyphs follow the roll in the
+ *   renderer. Gated per line on `energy`.
+ * @param {number[]|null} [opts.energy] per-line 0..1 audio energy. High lines
+ *   earn flight whips (and, above 0.78, one whip inside their own phrase);
+ *   quiet lines keep the plain eased flight.
  * @returns {{positions: number[][], exits: (number|null)[], stops: object[]}}
  *   `exits[i]` is an absolute `fade_out_at`, or `null` to leave the block's
  *   own timing alone (used for a `--keep-open` last line).
@@ -353,6 +361,9 @@ export function layoutField(lines, opts = {}) {
     step = 0.1,
     rmax = 16,
     groups = 'off',
+    whip = 0,
+    energy = null,
+    whipForce = null,
   } = opts;
 
   const n = lines.length;
@@ -430,6 +441,35 @@ export function layoutField(lines, opts = {}) {
     flightDur[i] = Math.max(cues[i] - start, 0.4);
   }
 
+  // ---- whip rolls on the flights ------------------------------------------
+  // v10. A transition may bank the camera up to ±90° while the screen is
+  // between lines and unwind it with a back-out ease onto the beat, which
+  // reads as the world whipping under the incoming line. Which lines earn
+  // one is decided by the music: only energetic lines, and not all of them
+  // (a whip every single cue would be its own kind of repetition). The sign
+  // is handed out at emission time, so flight whips and word whips share one
+  // alternation and consecutive banks never mirror each other.
+  const energyAt = (i) =>
+    clamp(Array.isArray(energy) ? Number(energy[i]) : 0.5, 0, 1) || 0;
+  // Authoring override: a line the caller named (`--force-whip`) earns its
+  // whips whatever the meter says — the chorus hook deserves its gesture even
+  // in a quiet pass.
+  const forceOf = (i) => !!(whipForce && whipForce[i]);
+  const flightWhip = new Array(n).fill(0);
+  let whipSign = 0;
+  if (whip > 0) {
+    for (let i = 0; i < n; i++) {
+      const r = rng(i * 2654435761 + 101);
+      const e = energyAt(i);
+      const forced = forceOf(i);
+      if ((!forced && e < 0.52) || flightDur[i] < 1.0 || (!forced && r() < 0.22)) {
+        continue;
+      }
+      flightWhip[i] =
+        (Math.PI / 2) * (0.8 + 0.2 * r()) * Math.min(whip, 1) * (0.72 + 0.28 * e);
+    }
+  }
+
   // ---- per-word choreography ----------------------------------------------
   // With `groups: 'auto'` every line is cut into words that land together, and
   // each gap between them gets its own camera move. Off, and a line is one
@@ -490,18 +530,66 @@ export function layoutField(lines, opts = {}) {
       flyYaw = 0;
       flyRoll = 0;
     }
-    stops.push({
-      at: r3(flightAt[i]),
-      duration: r3(flightDur[i]),
-      ease: 'ease_in_out_cubic',
-      target: slot.map(r3),
-      radius: r3(radius),
-      elevation: r3(elevation),
-      yaw: r3(flyYaw),
-      roll: r3(flyRoll),
-    });
 
-    let lastEnd = flightAt[i] + flightDur[i];
+    // A whipped transition is three stops: swing the bank in while the
+    // outgoing framing holds, fly to the slot while the bank unwinds past
+    // level (back_out overshoots, which is the whip-crack), then spend the
+    // last of it coming back to dead level just after the beat. The settle
+    // may never run into the next line's flight — its start is at least
+    // cues[i] + 0.8 or cues[i+1] - 0.4, whichever the gap allows — nor into
+    // the closing return to the title framing.
+    const whipMag = flightWhip[i];
+    let flightSettleEnd = flightAt[i] + flightDur[i];
+    if (whipMag !== 0) {
+      whipSign = whipSign === 0 ? 1 : -whipSign;
+      const signedMag = whipMag * whipSign;
+      const dA = Math.max(0.5, flightDur[i] * 0.55);
+      const dB = Math.max(0.45, flightDur[i] - dA);
+      const gapNext = (i + 1 < n ? cues[i + 1] : duration + 10) - cues[i];
+      const settleClamp = Math.min(
+        0.55,
+        Math.max(0.12, gapNext - 0.88),
+        backAt - (cues[i] + 0.08) - 0.02,
+      );
+      stops.push({
+        at: r3(flightAt[i]),
+        duration: r3(dA),
+        ease: 'ease_in_quad',
+        roll: r3(signedMag),
+      });
+      stops.push({
+        at: r3(flightAt[i] + dA),
+        duration: r3(dB),
+        ease: 'back_out',
+        target: slot.map(r3),
+        radius: r3(radius),
+        elevation: r3(elevation),
+        yaw: r3(flyYaw),
+        roll: r3(flyRoll),
+      });
+      if (settleClamp >= 0.1) {
+        stops.push({
+          at: r3(cues[i] + 0.08),
+          duration: r3(settleClamp),
+          ease: 'ease_out_quad',
+          roll: 0,
+        });
+        flightSettleEnd = cues[i] + 0.08 + settleClamp;
+      }
+    } else {
+      stops.push({
+        at: r3(flightAt[i]),
+        duration: r3(flightDur[i]),
+        ease: 'ease_in_out_cubic',
+        target: slot.map(r3),
+        radius: r3(radius),
+        elevation: r3(elevation),
+        yaw: r3(flyYaw),
+        roll: r3(flyRoll),
+      });
+    }
+
+    let lastEnd = flightSettleEnd;
     if (!choreo) {
       lineEnds[i] = lastEnd;
       continue;
@@ -518,6 +606,39 @@ export function layoutField(lines, opts = {}) {
       plan.push({ m: choreo[i].between[j - 1], on: groups[j].t, kick: false });
     }
 
+    // v10: one in-phrase whip on the widest word gap of a very energetic
+    // line. The camera banks just as the next word is due and unwinds while
+    // the word flies in — its glyphs follow the roll in the renderer, which
+    // is what sells the word landing *with* the camera. At most one per line,
+    // so a phrase never reads as spin for spin's sake. Line 0 is always in:
+    // the opening is the pitch, and its widest gap is where the camera gets
+    // to go the whole ninety degrees. The sign is only spent when the pair is
+    // actually placed — a whip that turns out not to fit must not consume the
+    // alternation.
+    let whipGapIdx = -1;
+    let whipGapScale = 0;
+    if (
+      whip > 0 &&
+      (energyAt(i) >= 0.78 || i === 0 || forceOf(i)) &&
+      groups.length > 2
+    ) {
+      let best = 0;
+      for (let j = 1; j < groups.length; j++) {
+        const gapLen = groups[j].t - groups[j - 1].t;
+        if (gapLen > best) {
+          best = gapLen;
+          whipGapIdx = j - 1;
+        }
+      }
+      if (best < 1.0) {
+        whipGapIdx = -1;
+      } else {
+        const r2 = rng(i * 97 + 13);
+        whipGapScale =
+          i === 0 ? (Math.PI / 2) * (0.85 + 0.1 * r2()) : 0.5 + 0.35 * r2();
+      }
+    }
+
     let curR = radius;
     let curE = elevation;
     let curYaw = flyYaw;
@@ -529,6 +650,35 @@ export function layoutField(lines, opts = {}) {
       // together are what stop the camera from landing on the beat every time.
       const nextOn = k + 1 < plan.length ? plan[k + 1].on : deadline + 0.35;
       const span = Math.max(nextOn - on, 0.18);
+
+      // The in-phrase whip: bank in ahead of the word, unwind on it. Falls
+      // through to the ordinary move when the gap turns out too tight once
+      // the neighbouring stops have claimed their time.
+      if (whipGapIdx >= 0 && !kick && on === groups[whipGapIdx + 1].t) {
+        const dA = Math.min(0.45, Math.max(0.24, span * 0.3));
+        const dB = Math.min(0.55, Math.max(0.28, span * 0.34));
+        const atA = Math.max(lastEnd + 0.02, on - dA - 0.05);
+        if (atA + dA <= on - 0.01 && on + dB <= deadline - 0.02) {
+          whipSign = whipSign === 0 ? 1 : -whipSign;
+          const mag = whipGapScale * Math.min(whip, 1) * whipSign;
+          stops.push({
+            at: r3(atA),
+            duration: r3(dA),
+            ease: 'ease_in_quad',
+            roll: r3(mag),
+          });
+          stops.push({
+            at: r3(on),
+            duration: r3(dB),
+            ease: 'ease_out_quad',
+            roll: r3(curRoll),
+          });
+          lastEnd = on + dB;
+          whipGapIdx = -1;
+          continue;
+        }
+      }
+
       let dur = Math.max(0.18, Math.min(span * m.pace, 1.1));
       let at = kick ? on : on - m.lead - dur;
       at = Math.max(at, lastEnd + 0.02);

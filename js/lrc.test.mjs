@@ -8,6 +8,9 @@ import {
   suggestDuration,
   buildLyricTexts,
   buildTitleBlock,
+  hexHsl,
+  hslHex,
+  applyPalette,
 } from './lrc.js';
 import { evalAll } from './anim.mjs';
 
@@ -316,4 +319,36 @@ test('scenes/bird.lrc keeps every word lit until the next line', () => {
       assert.ok(fade.fade_out_at <= next.start_at, `line ${i} overlaps the next cue`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// per-line palette (v10 --palette)
+// ---------------------------------------------------------------------------
+
+test('hexHsl / hslHex round-trip a palette colour', () => {
+  for (const hex of ['#ffeef7', '#e8f6ff', '#fff6e0', '#f3e9ff', '#6bd9ff', '#ffffff']) {
+    const { h, s, l } = hexHsl(hex);
+    assert.equal(hslHex(h, s, l), hex.toLowerCase(), `${hex} did not round-trip`);
+  }
+  // Greys carry no hue and survive the trip too.
+  assert.deepEqual(hexHsl('#808080'), { h: 0, s: 0, l: 128 / 255 });
+});
+
+test('applyPalette cycles the colours and retints each rim', () => {
+  const texts = buildLyricTexts([{ time: 1, text: 'A' }, { time: 2, text: 'B' }, { time: 3, text: 'C' }], {});
+  for (const t of texts) {
+    t.material.outline = { color: '#6bd9ff', width: 0.02, strength: 1 };
+  }
+  applyPalette(texts, '#ffeef7,#e8f6ff');
+  assert.equal(texts[0].material.color, '#ffeef7');
+  assert.equal(texts[1].material.color, '#e8f6ff');
+  assert.equal(texts[2].material.color, '#ffeef7', 'the cycle wraps');
+  for (const t of texts) {
+    const rim = t.material.outline.color;
+    assert.ok(/^#[0-9a-f]{6}$/.test(rim), `rim "${rim}" is not #rrggbb`);
+    assert.notEqual(rim, '#6bd9ff', 'the global rim must not survive');
+    // The rim is deeper than its glyph colour, so it stays a contour.
+    assert.ok(hexHsl(rim).l < hexHsl(t.material.color).l);
+  }
+  assert.throws(() => applyPalette(texts, 'nope'), /--palette/);
 });

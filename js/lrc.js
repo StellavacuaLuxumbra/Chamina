@@ -7,6 +7,7 @@
 
 const TIME_RE = /^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/;
 const META_RE = /^\[([A-Za-z_][\w#-]*):(.*)\]\s*$/;
+const HEX6_RE = /^#[0-9a-fA-F]{6}$/;
 // Per-line overrides ride in braces at the head of the lyric text:
 //   [00:16.575]{e:fall}远离那些繁华悲伤 …
 // Braces are never valid LRC lyric content, so the two syntaxes cannot clash.
@@ -672,6 +673,88 @@ export function buildTitleBlock(opts = {}) {
     };
   }
   return block;
+}
+
+// ---------------------------------------------------------------------------
+// per-line colour palette
+// ---------------------------------------------------------------------------
+
+/**
+ * `#rrggbb` → `{h, s, l}` in 0..1. Plain enough for tinting rims; not a colour
+ * science conversion.
+ */
+export function hexHsl(hex) {
+  const h = String(hex || '#ffffff').replace(/^#/, '');
+  const n = parseInt(h.slice(0, 6), 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let hh;
+  if (max === r) hh = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) hh = ((b - r) / d + 2) / 6;
+  else hh = ((r - g) / d + 4) / 6;
+  return { h: hh, s, l };
+}
+
+const hcl = (x) => Math.round(Math.min(255, Math.max(0, x)) * 255);
+
+function hue2rgb(p, q, t) {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+/** `{h, s, l}` in 0..1 → `#rrggbb`. */
+export function hslHex(h, s, l) {
+  const H = ((Number(h) || 0) % 1 + 1) % 1;
+  const S = Math.min(1, Math.max(0, Number(s) || 0));
+  const L = Math.min(1, Math.max(0, Number(l) || 0));
+  if (S === 0) {
+    const v = hcl(L);
+    return `#${((v << 16) | (v << 8) | v).toString(16).padStart(6, '0')}`;
+  }
+  const q = L < 0.5 ? L * (1 + S) : L + S - L * S;
+  const p = 2 * L - q;
+  const r = hcl(hue2rgb(p, q, H + 1 / 3));
+  const g = hcl(hue2rgb(p, q, H));
+  const b = hcl(hue2rgb(p, q, H - 1 / 3));
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
+/**
+ * Cycle a romantic palette across the lyric blocks. The rim follows each
+ * line's tint, hue-shifted a little and pushed darker and more saturated, so
+ * the outline stays a contour instead of competing with the glyph colour.
+ * Mutates and returns `texts` (title/outro cards are not in this list).
+ */
+export function applyPalette(texts, hexes) {
+  const pal = String(hexes)
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => HEX6_RE.test(s));
+  if (!pal.length) throw new Error(`--palette wants comma-separated #rrggbb values`);
+  texts.forEach((tx, i) => {
+    const c = pal[i % pal.length];
+    tx.material.color = c.toLowerCase();
+    if (tx.material.outline) {
+      const { h, s, l } = hexHsl(c);
+      tx.material.outline.color = hslHex(
+        h + 0.055,
+        Math.min(1, s * 1.6 + 0.18),
+        l * 0.6,
+      );
+    }
+  });
+  return texts;
 }
 
 /**

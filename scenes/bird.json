@@ -1,7 +1,7 @@
 {
   "width": 1920,
   "height": 1080,
-  "fps": 60,
+  "fps": 30,
   "duration": 367,
   "background": "#05060f",
   "hdr": true,
@@ -133,21 +133,19 @@
         "roll": 0.03
       },
       {
-        "at": 19.928,
-        "duration": 0.384,
+        "at": 19.97,
+        "duration": 0.24,
         "ease": "ease_in_quad",
-        "target": [
-          -0.011,
-          0.555,
-          -0.049
-        ],
-        "radius": 14,
-        "elevation": 0.09,
-        "yaw": 0.05,
+        "roll": 1.424
+      },
+      {
+        "at": 20.26,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.03
       },
       {
-        "at": 20.518,
+        "at": 20.56,
         "duration": 0.339,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -161,7 +159,7 @@
         "roll": 0.03
       },
       {
-        "at": 20.877,
+        "at": 20.919,
         "duration": 0.727,
         "ease": "ease_out_quad",
         "target": [
@@ -190,8 +188,14 @@
       },
       {
         "at": 22.56,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.13
+      },
+      {
+        "at": 23.66,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           31.391,
           -0.946,
@@ -203,7 +207,13 @@
         "roll": -0.04
       },
       {
-        "at": 24.58,
+        "at": 24.64,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 25.21,
         "duration": 0.326,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -217,7 +227,7 @@
         "roll": -0.04
       },
       {
-        "at": 24.926,
+        "at": 25.556,
         "duration": 0.315,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -231,7 +241,7 @@
         "roll": 0.051
       },
       {
-        "at": 25.261,
+        "at": 25.891,
         "duration": 0.53,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -245,7 +255,7 @@
         "roll": 0.051
       },
       {
-        "at": 25.811,
+        "at": 26.441,
         "duration": 0.854,
         "ease": "ease_in_quad",
         "target": [
@@ -259,18 +269,16 @@
         "roll": 0.051
       },
       {
-        "at": 27.521,
-        "duration": 0.444,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          31.391,
-          -0.946,
-          -0.252
-        ],
-        "radius": 14.6,
-        "elevation": 0.15,
-        "yaw": -0.07,
-        "roll": -0.059
+        "at": 27.73,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": 0.545
+      },
+      {
+        "at": 28.02,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
+        "roll": 0.051
       },
       {
         "at": 28.504,
@@ -284,7 +292,7 @@
         "radius": 14.6,
         "elevation": 0.15,
         "yaw": -0.07,
-        "roll": -0.059
+        "roll": 0.051
       },
       {
         "at": 28.911,
@@ -298,12 +306,18 @@
         "radius": 14.6,
         "elevation": 0.15,
         "yaw": -0.07,
-        "roll": -0.174
+        "roll": -0.064
       },
       {
         "at": 29.4,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.201
+      },
+      {
+        "at": 30.5,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           59.176,
           1.326,
@@ -315,7 +329,13 @@
         "roll": 0
       },
       {
-        "at": 31.711,
+        "at": 31.48,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 32.05,
         "duration": 0.616,
         "ease": "smooth",
         "target": [
@@ -372,8 +392,14 @@
       },
       {
         "at": 38.07,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.134
+      },
+      {
+        "at": 39.17,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           60.05,
           13.358,
@@ -385,7 +411,13 @@
         "roll": -0.02
       },
       {
-        "at": 40.664,
+        "at": 40.15,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 40.72,
         "duration": 0.32,
         "ease": "ease_in_quad",
         "target": [
@@ -399,7 +431,7 @@
         "roll": -0.02
       },
       {
-        "at": 41.003,
+        "at": 41.06,
         "duration": 0.617,
         "ease": "ease_in_quad",
         "target": [
@@ -413,7 +445,7 @@
         "roll": -0.02
       },
       {
-        "at": 41.641,
+        "at": 41.697,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -610,8 +642,14 @@
       },
       {
         "at": 59.89,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.301
+      },
+      {
+        "at": 60.99,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           0.428,
           16.443,
@@ -623,7 +661,13 @@
         "roll": -0.05
       },
       {
-        "at": 61.91,
+        "at": 61.97,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 62.54,
         "duration": 0.361,
         "ease": "ease_in_quad",
         "target": [
@@ -637,7 +681,7 @@
         "roll": -0.05
       },
       {
-        "at": 62.291,
+        "at": 62.921,
         "duration": 0.369,
         "ease": "smooth",
         "target": [
@@ -651,7 +695,7 @@
         "roll": -0.05
       },
       {
-        "at": 62.865,
+        "at": 63.31,
         "duration": 0.216,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -665,7 +709,7 @@
         "roll": -0.05
       },
       {
-        "at": 63.101,
+        "at": 63.546,
         "duration": 0.476,
         "ease": "smooth",
         "target": [
@@ -679,7 +723,7 @@
         "roll": -0.129
       },
       {
-        "at": 63.615,
+        "at": 64.043,
         "duration": 0.572,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -693,7 +737,7 @@
         "roll": -0.053
       },
       {
-        "at": 64.207,
+        "at": 64.635,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -708,8 +752,14 @@
       },
       {
         "at": 67.67,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.425
+      },
+      {
+        "at": 68.77,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -31.186,
           14.318,
@@ -721,7 +771,13 @@
         "roll": 0.02
       },
       {
-        "at": 70.064,
+        "at": 69.75,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 70.32,
         "duration": 0.375,
         "ease": "ease_in_quad",
         "target": [
@@ -834,8 +890,14 @@
       },
       {
         "at": 75.66,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.256
+      },
+      {
+        "at": 76.76,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -60,
           15,
@@ -847,7 +909,13 @@
         "roll": 0.03
       },
       {
-        "at": 77.936,
+        "at": 77.74,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 78.31,
         "duration": 0.391,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -861,7 +929,7 @@
         "roll": 0.03
       },
       {
-        "at": 78.348,
+        "at": 78.721,
         "duration": 0.871,
         "ease": "smooth",
         "target": [
@@ -875,7 +943,7 @@
         "roll": 0.03
       },
       {
-        "at": 79.275,
+        "at": 79.612,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -904,8 +972,14 @@
       },
       {
         "at": 82.12,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.383
+      },
+      {
+        "at": 83.22,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -58.602,
           29.055,
@@ -917,7 +991,13 @@
         "roll": -0.04
       },
       {
-        "at": 84.14,
+        "at": 84.2,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 84.77,
         "duration": 0.35,
         "ease": "ease_in_quad",
         "target": [
@@ -931,7 +1011,7 @@
         "roll": -0.04
       },
       {
-        "at": 84.51,
+        "at": 85.14,
         "duration": 0.348,
         "ease": "ease_out_quad",
         "target": [
@@ -945,7 +1025,7 @@
         "roll": -0.04
       },
       {
-        "at": 84.878,
+        "at": 85.508,
         "duration": 0.18,
         "ease": "ease_out_quad",
         "target": [
@@ -959,7 +1039,7 @@
         "roll": -0.182
       },
       {
-        "at": 85.078,
+        "at": 85.708,
         "duration": 0.979,
         "ease": "smooth",
         "target": [
@@ -973,7 +1053,7 @@
         "roll": -0.182
       },
       {
-        "at": 86.187,
+        "at": 86.707,
         "duration": 0.835,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -987,7 +1067,7 @@
         "roll": -0.182
       },
       {
-        "at": 87.292,
+        "at": 87.563,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1002,8 +1082,14 @@
       },
       {
         "at": 90.56,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.365
+      },
+      {
+        "at": 91.66,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -30.83,
           31.323,
@@ -1015,7 +1101,13 @@
         "roll": 0.05
       },
       {
-        "at": 92.58,
+        "at": 92.64,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 93.21,
         "duration": 1.1,
         "ease": "smooth",
         "target": [
@@ -1029,21 +1121,19 @@
         "roll": 0.05
       },
       {
-        "at": 95.721,
-        "duration": 0.18,
+        "at": 95.65,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": 0.761
+      },
+      {
+        "at": 95.94,
+        "duration": 0.28,
         "ease": "ease_out_quad",
-        "target": [
-          -30.83,
-          31.323,
-          0.027
-        ],
-        "radius": 14.221,
-        "elevation": 0.073,
-        "yaw": -0.014,
         "roll": 0.05
       },
       {
-        "at": 95.921,
+        "at": 96.24,
         "duration": 0.518,
         "ease": "smooth",
         "target": [
@@ -1053,25 +1143,25 @@
         ],
         "radius": 14.221,
         "elevation": 0.073,
-        "yaw": -0.038,
+        "yaw": -0.017,
         "roll": 0.05
       },
       {
-        "at": 96.459,
+        "at": 96.778,
         "duration": 0.424,
         "ease": "smooth",
         "target": [
-          -30.839,
+          -30.838,
           31.994,
           -0.021
         ],
         "radius": 14.221,
         "elevation": 0.073,
-        "yaw": -0.038,
+        "yaw": -0.017,
         "roll": 0.05
       },
       {
-        "at": 97.161,
+        "at": 97.222,
         "duration": 0.224,
         "ease": "ease_in_quad",
         "target": [
@@ -1081,11 +1171,11 @@
         ],
         "radius": 14.221,
         "elevation": 0.05,
-        "yaw": -0.038,
+        "yaw": -0.017,
         "roll": 0.05
       },
       {
-        "at": 97.405,
+        "at": 97.466,
         "duration": 0.438,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1095,7 +1185,7 @@
         ],
         "radius": 14.221,
         "elevation": 0.022,
-        "yaw": -0.038,
+        "yaw": -0.017,
         "roll": 0.05
       },
       {
@@ -1170,8 +1260,14 @@
       },
       {
         "at": 106.3,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.469
+      },
+      {
+        "at": 107.4,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           28.748,
           30.535,
@@ -1183,7 +1279,13 @@
         "roll": 0.04
       },
       {
-        "at": 108.32,
+        "at": 108.38,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 108.95,
         "duration": 0.283,
         "ease": "ease_out_quad",
         "target": [
@@ -1197,7 +1299,7 @@
         "roll": 0.04
       },
       {
-        "at": 108.626,
+        "at": 109.253,
         "duration": 0.252,
         "ease": "ease_out_quad",
         "target": [
@@ -1211,7 +1313,7 @@
         "roll": 0.04
       },
       {
-        "at": 108.897,
+        "at": 109.525,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -1225,21 +1327,19 @@
         "roll": 0.04
       },
       {
-        "at": 111.632,
-        "duration": 0.18,
+        "at": 111.46,
+        "duration": 0.24,
         "ease": "ease_in_quad",
-        "target": [
-          28.748,
-          30.535,
-          0.108
-        ],
-        "radius": 14.119,
-        "elevation": 0.132,
-        "yaw": 0.038,
+        "roll": 0.836
+      },
+      {
+        "at": 111.75,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.04
       },
       {
-        "at": 111.832,
+        "at": 112.05,
         "duration": 0.473,
         "ease": "ease_out_quad",
         "target": [
@@ -1248,28 +1348,20 @@
           0.041
         ],
         "radius": 14.119,
-        "elevation": 0.132,
+        "elevation": 0.086,
         "yaw": 0.038,
         "roll": 0.04
       },
       {
-        "at": 112.326,
-        "duration": 0.277,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          28.748,
-          30.535,
-          0.108
-        ],
-        "radius": 14.119,
-        "elevation": 0.132,
-        "yaw": 0.029,
-        "roll": 0.04
+        "at": 112.63,
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.206
       },
       {
-        "at": 112.63,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "at": 113.73,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           60.444,
           31.432,
@@ -1281,7 +1373,13 @@
         "roll": -0.05
       },
       {
-        "at": 114.65,
+        "at": 114.71,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 115.28,
         "duration": 0.465,
         "ease": "smooth",
         "target": [
@@ -1295,7 +1393,7 @@
         "roll": -0.05
       },
       {
-        "at": 115.135,
+        "at": 115.765,
         "duration": 0.363,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1309,7 +1407,7 @@
         "roll": -0.204
       },
       {
-        "at": 115.702,
+        "at": 116.147,
         "duration": 0.441,
         "ease": "ease_in_quad",
         "target": [
@@ -1323,7 +1421,7 @@
         "roll": -0.204
       },
       {
-        "at": 116.163,
+        "at": 116.608,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -1394,8 +1492,14 @@
       },
       {
         "at": 120.53,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.352
+      },
+      {
+        "at": 121.63,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           58.807,
           44.324,
@@ -1407,7 +1511,13 @@
         "roll": 0.02
       },
       {
-        "at": 122.969,
+        "at": 122.61,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 123.18,
         "duration": 0.382,
         "ease": "ease_in_quad",
         "target": [
@@ -1421,7 +1531,7 @@
         "roll": 0.02
       },
       {
-        "at": 123.37,
+        "at": 123.582,
         "duration": 0.473,
         "ease": "ease_in_quad",
         "target": [
@@ -1435,7 +1545,7 @@
         "roll": 0.02
       },
       {
-        "at": 123.863,
+        "at": 124.075,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1449,17 +1559,15 @@
         "roll": 0.02
       },
       {
-        "at": 125.811,
-        "duration": 0.471,
-        "ease": "smooth",
-        "target": [
-          58.807,
-          43.559,
-          0.173
-        ],
-        "radius": 14.525,
-        "elevation": 0.006,
-        "yaw": -0.037,
+        "at": 126.15,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.789
+      },
+      {
+        "at": 126.44,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.02
       },
       {
@@ -1492,8 +1600,14 @@
       },
       {
         "at": 127.58,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.303
+      },
+      {
+        "at": 128.68,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           30,
           45,
@@ -1505,7 +1619,13 @@
         "roll": 0.03
       },
       {
-        "at": 129.831,
+        "at": 129.66,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 130.23,
         "duration": 0.4,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1519,7 +1639,7 @@
         "roll": 0.03
       },
       {
-        "at": 130.251,
+        "at": 130.65,
         "duration": 0.811,
         "ease": "smooth",
         "target": [
@@ -1533,7 +1653,7 @@
         "roll": 0.03
       },
       {
-        "at": 131.319,
+        "at": 131.481,
         "duration": 0.482,
         "ease": "ease_out_quad",
         "target": [
@@ -1547,7 +1667,7 @@
         "roll": 0.03
       },
       {
-        "at": 131.821,
+        "at": 131.983,
         "duration": 1.04,
         "ease": "ease_in_quad",
         "target": [
@@ -1561,21 +1681,19 @@
         "roll": 0.03
       },
       {
-        "at": 133.818,
-        "duration": 0.408,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          29.027,
-          45,
-          -0.133
-        ],
-        "radius": 13.837,
-        "elevation": 0.052,
-        "yaw": 0.224,
+        "at": 133.95,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.789
+      },
+      {
+        "at": 134.24,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.03
       },
       {
-        "at": 134.405,
+        "at": 134.54,
         "duration": 0.185,
         "ease": "smooth",
         "target": [
@@ -1589,7 +1707,7 @@
         "roll": 0.03
       },
       {
-        "at": 134.709,
+        "at": 134.745,
         "duration": 0.27,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1632,8 +1750,14 @@
       },
       {
         "at": 136.3,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.412
+      },
+      {
+        "at": 137.4,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           1.261,
           44.07,
@@ -1645,7 +1769,13 @@
         "roll": -0.04
       },
       {
-        "at": 138.32,
+        "at": 138.38,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 138.95,
         "duration": 0.546,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -1659,7 +1789,7 @@
         "roll": -0.04
       },
       {
-        "at": 138.921,
+        "at": 139.516,
         "duration": 0.495,
         "ease": "ease_in_quad",
         "target": [
@@ -1673,7 +1803,7 @@
         "roll": -0.04
       },
       {
-        "at": 139.436,
+        "at": 140.031,
         "duration": 1.1,
         "ease": "smooth",
         "target": [
@@ -1729,21 +1859,19 @@
         "roll": -0.04
       },
       {
-        "at": 146.877,
-        "duration": 0.286,
-        "ease": "ease_out_quad",
-        "target": [
-          1.261,
-          44.07,
-          0.038
-        ],
-        "radius": 13.688,
-        "elevation": 0.14,
-        "yaw": -0.216,
-        "roll": -0.092
+        "at": 146.77,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.549
       },
       {
-        "at": 147.183,
+        "at": 147.06,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
+        "roll": -0.04
+      },
+      {
+        "at": 147.36,
         "duration": 1.1,
         "ease": "ease_in_quad",
         "target": [
@@ -1754,12 +1882,18 @@
         "radius": 13.688,
         "elevation": 0.2,
         "yaw": -0.216,
-        "roll": -0.092
+        "roll": -0.04
       },
       {
         "at": 166.1,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.176
+      },
+      {
+        "at": 167.2,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -30.801,
           46.273,
@@ -1771,7 +1905,13 @@
         "roll": 0.05
       },
       {
-        "at": 168.12,
+        "at": 168.18,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 168.75,
         "duration": 0.506,
         "ease": "ease_in_quad",
         "target": [
@@ -1785,7 +1925,7 @@
         "roll": 0.05
       },
       {
-        "at": 168.646,
+        "at": 169.276,
         "duration": 0.18,
         "ease": "ease_in_quad",
         "target": [
@@ -1799,7 +1939,7 @@
         "roll": 0.05
       },
       {
-        "at": 168.846,
+        "at": 169.476,
         "duration": 0.798,
         "ease": "smooth",
         "target": [
@@ -1813,7 +1953,7 @@
         "roll": 0.05
       },
       {
-        "at": 170.048,
+        "at": 170.295,
         "duration": 0.392,
         "ease": "ease_out_quad",
         "target": [
@@ -1884,8 +2024,14 @@
       },
       {
         "at": 173.8,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.185
+      },
+      {
+        "at": 174.9,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -59.996,
           43.439,
@@ -1897,7 +2043,13 @@
         "roll": -0.02
       },
       {
-        "at": 175.82,
+        "at": 175.88,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 176.45,
         "duration": 0.78,
         "ease": "smooth",
         "target": [
@@ -1911,7 +2063,7 @@
         "roll": -0.02
       },
       {
-        "at": 176.62,
+        "at": 177.25,
         "duration": 0.617,
         "ease": "smooth",
         "target": [
@@ -1925,7 +2077,7 @@
         "roll": -0.02
       },
       {
-        "at": 177.879,
+        "at": 177.887,
         "duration": 0.279,
         "ease": "ease_in_quad",
         "target": [
@@ -1968,8 +2120,14 @@
       },
       {
         "at": 180.85,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.187
+      },
+      {
+        "at": 181.95,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -60.807,
           60.507,
@@ -1981,7 +2139,13 @@
         "roll": 0.04
       },
       {
-        "at": 182.87,
+        "at": 182.93,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 183.5,
         "duration": 1.1,
         "ease": "ease_in_quad",
         "target": [
@@ -1995,7 +2159,7 @@
         "roll": 0.04
       },
       {
-        "at": 184.117,
+        "at": 184.62,
         "duration": 0.398,
         "ease": "ease_out_quad",
         "target": [
@@ -2206,8 +2370,14 @@
       },
       {
         "at": 196.72,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": -1.387
+      },
+      {
+        "at": 197.82,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -0.799,
           59.366,
@@ -2219,7 +2389,13 @@
         "roll": 0.02
       },
       {
-        "at": 198.746,
+        "at": 198.8,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 199.37,
         "duration": 0.214,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2233,7 +2409,7 @@
         "roll": 0.02
       },
       {
-        "at": 198.98,
+        "at": 199.604,
         "duration": 1.064,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2247,7 +2423,7 @@
         "roll": 0.02
       },
       {
-        "at": 200.063,
+        "at": 200.687,
         "duration": 0.755,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2261,7 +2437,7 @@
         "roll": 0.02
       },
       {
-        "at": 201.3,
+        "at": 201.463,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2276,8 +2452,14 @@
       },
       {
         "at": 204.55,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.417
+      },
+      {
+        "at": 205.65,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           30,
           60,
@@ -2289,7 +2471,13 @@
         "roll": 0.03
       },
       {
-        "at": 206.57,
+        "at": 206.63,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 207.2,
         "duration": 0.473,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2303,7 +2491,7 @@
         "roll": 0.03
       },
       {
-        "at": 207.063,
+        "at": 207.693,
         "duration": 1.1,
         "ease": "ease_in_quad",
         "target": [
@@ -2317,21 +2505,19 @@
         "roll": 0.03
       },
       {
-        "at": 209.519,
-        "duration": 0.252,
+        "at": 209.66,
+        "duration": 0.24,
         "ease": "ease_in_quad",
-        "target": [
-          30,
-          60,
-          0
-        ],
-        "radius": 14.262,
-        "elevation": 0.183,
-        "yaw": 0.05,
+        "roll": -0.753
+      },
+      {
+        "at": 209.95,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.03
       },
       {
-        "at": 209.791,
+        "at": 210.25,
         "duration": 0.723,
         "ease": "smooth",
         "target": [
@@ -2339,7 +2525,7 @@
           60,
           0
         ],
-        "radius": 14.262,
+        "radius": 12.993,
         "elevation": 0.214,
         "yaw": 0.05,
         "roll": 0.03
@@ -2349,11 +2535,11 @@
         "duration": 0.224,
         "ease": "smooth",
         "target": [
-          28.79,
+          28.897,
           60,
-          -0.106
+          -0.097
         ],
-        "radius": 14.262,
+        "radius": 12.993,
         "elevation": 0.214,
         "yaw": 0.05,
         "roll": 0.03
@@ -2367,15 +2553,21 @@
           60,
           0
         ],
-        "radius": 12.929,
+        "radius": 12.66,
         "elevation": 0.214,
         "yaw": 0.05,
         "roll": 0.03
       },
       {
         "at": 212.3,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.394
+      },
+      {
+        "at": 213.4,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           60.636,
           59.139,
@@ -2387,7 +2579,13 @@
         "roll": -0.04
       },
       {
-        "at": 214.32,
+        "at": 214.38,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 214.95,
         "duration": 0.395,
         "ease": "ease_in_quad",
         "target": [
@@ -2401,7 +2599,7 @@
         "roll": 0.027
       },
       {
-        "at": 214.735,
+        "at": 215.365,
         "duration": 1.1,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2415,7 +2613,7 @@
         "roll": 0.027
       },
       {
-        "at": 216.277,
+        "at": 216.485,
         "duration": 0.277,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2429,7 +2627,7 @@
         "roll": 0.085
       },
       {
-        "at": 216.574,
+        "at": 216.782,
         "duration": 0.668,
         "ease": "smooth",
         "target": [
@@ -2443,7 +2641,7 @@
         "roll": 0.007
       },
       {
-        "at": 217.262,
+        "at": 217.47,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -2513,21 +2711,19 @@
         "roll": 0.05
       },
       {
-        "at": 225.488,
-        "duration": 0.18,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          59.661,
-          76.203,
-          -0.237
-        ],
-        "radius": 13.102,
-        "elevation": 0.131,
-        "yaw": 0.19,
+        "at": 225.43,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.779
+      },
+      {
+        "at": 225.72,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.05
       },
       {
-        "at": 225.688,
+        "at": 226.02,
         "duration": 0.321,
         "ease": "ease_out_quad",
         "target": [
@@ -2537,13 +2733,33 @@
         ],
         "radius": 13.102,
         "elevation": 0.131,
-        "yaw": 0.19,
-        "roll": 0.08
+        "yaw": 0.03,
+        "roll": 0.17
+      },
+      {
+        "at": 226.361,
+        "duration": 0.403,
+        "ease": "ease_in_quad",
+        "target": [
+          60.362,
+          76.203,
+          -0.171
+        ],
+        "radius": 13.102,
+        "elevation": 0.131,
+        "yaw": 0.03,
+        "roll": 0.17
       },
       {
         "at": 226.88,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.468
+      },
+      {
+        "at": 227.98,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           29.973,
           73.522,
@@ -2555,7 +2771,13 @@
         "roll": -0.02
       },
       {
-        "at": 228.9,
+        "at": 228.96,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 229.53,
         "duration": 0.359,
         "ease": "ease_in_quad",
         "target": [
@@ -2569,7 +2791,7 @@
         "roll": -0.02
       },
       {
-        "at": 229.42,
+        "at": 229.909,
         "duration": 0.314,
         "ease": "smooth",
         "target": [
@@ -2583,7 +2805,7 @@
         "roll": -0.02
       },
       {
-        "at": 229.753,
+        "at": 230.242,
         "duration": 0.403,
         "ease": "smooth",
         "target": [
@@ -2597,7 +2819,7 @@
         "roll": -0.02
       },
       {
-        "at": 230.177,
+        "at": 230.666,
         "duration": 0.917,
         "ease": "ease_out_quad",
         "target": [
@@ -2611,7 +2833,19 @@
         "roll": -0.02
       },
       {
-        "at": 232.642,
+        "at": 232.24,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.618
+      },
+      {
+        "at": 232.53,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
+        "roll": -0.02
+      },
+      {
+        "at": 232.83,
         "duration": 0.323,
         "ease": "smooth",
         "target": [
@@ -2625,7 +2859,7 @@
         "roll": -0.02
       },
       {
-        "at": 233.001,
+        "at": 233.173,
         "duration": 0.598,
         "ease": "smooth",
         "target": [
@@ -2639,7 +2873,7 @@
         "roll": -0.02
       },
       {
-        "at": 233.654,
+        "at": 233.791,
         "duration": 0.569,
         "ease": "ease_out_quad",
         "target": [
@@ -2654,8 +2888,14 @@
       },
       {
         "at": 234.78,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.388
+      },
+      {
+        "at": 235.88,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -0.416,
           75.483,
@@ -2667,7 +2907,13 @@
         "roll": 0.04
       },
       {
-        "at": 236.8,
+        "at": 236.86,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 237.43,
         "duration": 0.485,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -2681,7 +2927,7 @@
         "roll": 0.129
       },
       {
-        "at": 237.305,
+        "at": 237.935,
         "duration": 0.296,
         "ease": "ease_out_quad",
         "target": [
@@ -2695,7 +2941,7 @@
         "roll": 0.027
       },
       {
-        "at": 237.667,
+        "at": 238.252,
         "duration": 0.322,
         "ease": "smooth",
         "target": [
@@ -2709,7 +2955,7 @@
         "roll": 0.027
       },
       {
-        "at": 238.01,
+        "at": 238.594,
         "duration": 1.1,
         "ease": "smooth",
         "target": [
@@ -2723,17 +2969,15 @@
         "roll": 0.027
       },
       {
-        "at": 239.945,
-        "duration": 0.587,
+        "at": 240.12,
+        "duration": 0.24,
         "ease": "ease_in_quad",
-        "target": [
-          -0.4,
-          76.198,
-          -0.243
-        ],
-        "radius": 13.205,
-        "elevation": 0.155,
-        "yaw": 0.06,
+        "roll": -0.622
+      },
+      {
+        "at": 240.41,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.027
       },
       {
@@ -2849,17 +3093,15 @@
         "roll": -0.069
       },
       {
-        "at": 247.952,
-        "duration": 0.248,
+        "at": 247.99,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": 0.543
+      },
+      {
+        "at": 248.28,
+        "duration": 0.28,
         "ease": "ease_out_quad",
-        "target": [
-          -29.781,
-          76.286,
-          -0.279
-        ],
-        "radius": 12.87,
-        "elevation": 0.281,
-        "yaw": -0.062,
         "roll": -0.069
       },
       {
@@ -2867,13 +3109,13 @@
         "duration": 0.18,
         "ease": "ease_out_quad",
         "target": [
-          -29.773,
+          -29.8,
           77.057,
           -0.502
         ],
         "radius": 12.87,
         "elevation": 0.281,
-        "yaw": -0.062,
+        "yaw": -0.181,
         "roll": -0.069
       },
       {
@@ -2887,7 +3129,7 @@
         ],
         "radius": 12.87,
         "elevation": 0.337,
-        "yaw": -0.062,
+        "yaw": -0.181,
         "roll": -0.069
       },
       {
@@ -2901,7 +3143,7 @@
         ],
         "radius": 12.87,
         "elevation": 0.337,
-        "yaw": -0.24,
+        "yaw": -0.26,
         "roll": -0.069
       },
       {
@@ -2909,13 +3151,13 @@
         "duration": 0.131,
         "ease": "smooth",
         "target": [
-          -30.087,
+          -29.934,
           76.286,
-          -0.236
+          -0.255
         ],
         "radius": 12.87,
         "elevation": 0.337,
-        "yaw": -0.24,
+        "yaw": -0.26,
         "roll": -0.069
       },
       {
@@ -3031,21 +3273,19 @@
         "roll": -0.047
       },
       {
-        "at": 260.503,
-        "duration": 0.401,
+        "at": 260.79,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.847
+      },
+      {
+        "at": 261.08,
+        "duration": 0.28,
         "ease": "ease_out_quad",
-        "target": [
-          -60.526,
-          74.389,
-          0.054
-        ],
-        "radius": 12.831,
-        "elevation": 0.196,
-        "yaw": 0.104,
         "roll": -0.047
       },
       {
-        "at": 260.924,
+        "at": 261.38,
         "duration": 0.877,
         "ease": "ease_out_quad",
         "target": [
@@ -3054,14 +3294,20 @@
           0.054
         ],
         "radius": 12.831,
-        "elevation": 0.196,
-        "yaw": 0.14,
+        "elevation": 0.251,
+        "yaw": 0.122,
         "roll": -0.047
       },
       {
         "at": 262.29,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.263
+      },
+      {
+        "at": 263.39,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -60,
           90,
@@ -3073,65 +3319,33 @@
         "roll": 0
       },
       {
-        "at": 267.615,
-        "duration": 0.333,
+        "at": 264.37,
+        "duration": 0.55,
         "ease": "ease_out_quad",
-        "target": [
-          -60,
-          90,
-          0
-        ],
-        "radius": 12.647,
-        "elevation": 0.216,
-        "yaw": -0.076,
         "roll": 0
       },
       {
-        "at": 267.968,
-        "duration": 0.36,
-        "ease": "ease_out_quad",
-        "target": [
-          -59.651,
-          90,
-          0.019
-        ],
-        "radius": 12.647,
-        "elevation": 0.216,
-        "yaw": -0.076,
-        "roll": 0
+        "at": 267.61,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.69
       },
       {
-        "at": 268.347,
-        "duration": 0.689,
-        "ease": "ease_out_quad",
-        "target": [
-          -60,
-          90,
-          0
-        ],
-        "radius": 12.647,
-        "elevation": 0.216,
-        "yaw": -0.076,
-        "roll": 0.149
-      },
-      {
-        "at": 269.718,
+        "at": 267.9,
         "duration": 0.28,
         "ease": "ease_out_quad",
-        "target": [
-          -60.01,
-          89.215,
-          0.172
-        ],
-        "radius": 12.647,
-        "elevation": 0.216,
-        "yaw": -0.076,
-        "roll": 0.149
+        "roll": 0
       },
       {
         "at": 270.08,
-        "duration": 2,
-        "ease": "ease_in_out_cubic",
+        "duration": 1.1,
+        "ease": "ease_in_quad",
+        "roll": 1.165
+      },
+      {
+        "at": 271.18,
+        "duration": 0.9,
+        "ease": "back_out",
         "target": [
           -29.591,
           89.163,
@@ -3143,7 +3357,13 @@
         "roll": -0.04
       },
       {
-        "at": 272.1,
+        "at": 272.16,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 272.73,
         "duration": 0.46,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3157,7 +3377,7 @@
         "roll": -0.116
       },
       {
-        "at": 272.58,
+        "at": 273.21,
         "duration": 0.344,
         "ease": "ease_in_quad",
         "target": [
@@ -3171,7 +3391,7 @@
         "roll": 0.021
       },
       {
-        "at": 272.944,
+        "at": 273.574,
         "duration": 0.438,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3185,7 +3405,7 @@
         "roll": 0.021
       },
       {
-        "at": 273.402,
+        "at": 274.032,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -3199,21 +3419,19 @@
         "roll": 0.021
       },
       {
-        "at": 275.512,
-        "duration": 0.425,
+        "at": 275.54,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.656
+      },
+      {
+        "at": 275.83,
+        "duration": 0.28,
         "ease": "ease_out_quad",
-        "target": [
-          -29.576,
-          90.006,
-          0.061
-        ],
-        "radius": 13.765,
-        "elevation": 0.247,
-        "yaw": -0.07,
         "roll": 0.021
       },
       {
-        "at": 276.045,
+        "at": 276.13,
         "duration": 0.355,
         "ease": "smooth",
         "target": [
@@ -3227,7 +3445,7 @@
         "roll": 0.021
       },
       {
-        "at": 276.47,
+        "at": 276.505,
         "duration": 0.298,
         "ease": "smooth",
         "target": [
@@ -3298,8 +3516,14 @@
       },
       {
         "at": 279.65,
-        "duration": 1.57,
-        "ease": "ease_in_out_cubic",
+        "duration": 0.863,
+        "ease": "ease_in_quad",
+        "roll": 1.463
+      },
+      {
+        "at": 280.514,
+        "duration": 0.706,
+        "ease": "back_out",
         "target": [
           29.939,
           88.548,
@@ -3311,7 +3535,13 @@
         "roll": -0.02
       },
       {
-        "at": 281.24,
+        "at": 281.3,
+        "duration": 0.55,
+        "ease": "ease_out_quad",
+        "roll": 0
+      },
+      {
+        "at": 281.87,
         "duration": 0.432,
         "ease": "ease_in_quad",
         "target": [
@@ -3325,7 +3555,7 @@
         "roll": -0.02
       },
       {
-        "at": 281.692,
+        "at": 282.322,
         "duration": 1.015,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3339,21 +3569,19 @@
         "roll": 0.13
       },
       {
-        "at": 283.372,
-        "duration": 0.312,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          29.939,
-          88.548,
-          0.379
-        ],
-        "radius": 13.416,
-        "elevation": 0.312,
-        "yaw": -0.186,
+        "at": 283.39,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": -0.6
+      },
+      {
+        "at": 283.68,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.13
       },
       {
-        "at": 283.852,
+        "at": 283.98,
         "duration": 0.18,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3362,12 +3590,12 @@
           0.379
         ],
         "radius": 13.416,
-        "elevation": 0.312,
+        "elevation": 0.259,
         "yaw": -0.26,
         "roll": 0.13
       },
       {
-        "at": 284.052,
+        "at": 284.18,
         "duration": 0.267,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3376,12 +3604,12 @@
           0.229
         ],
         "radius": 13.416,
-        "elevation": 0.312,
+        "elevation": 0.259,
         "yaw": -0.26,
         "roll": 0.13
       },
       {
-        "at": 284.339,
+        "at": 284.467,
         "duration": 0.505,
         "ease": "ease_in_out_cubic",
         "target": [
@@ -3390,7 +3618,7 @@
           0.379
         ],
         "radius": 13.416,
-        "elevation": 0.335,
+        "elevation": 0.281,
         "yaw": -0.26,
         "roll": 0.13
       },
@@ -3404,7 +3632,7 @@
           0.379
         ],
         "radius": 13.416,
-        "elevation": 0.335,
+        "elevation": 0.281,
         "yaw": -0.188,
         "roll": 0.13
       },
@@ -3413,12 +3641,12 @@
         "duration": 0.209,
         "ease": "ease_in_quad",
         "target": [
-          29.597,
+          29.255,
           88.548,
-          0.389
+          0.399
         ],
         "radius": 13.416,
-        "elevation": 0.335,
+        "elevation": 0.281,
         "yaw": -0.188,
         "roll": 0.13
       },
@@ -3535,21 +3763,19 @@
         "roll": 0.04
       },
       {
-        "at": 295.939,
-        "duration": 0.377,
-        "ease": "ease_in_out_cubic",
-        "target": [
-          59.754,
-          91.204,
-          -0.393
-        ],
-        "radius": 13.909,
-        "elevation": 0.325,
-        "yaw": 0.06,
+        "at": 296.04,
+        "duration": 0.24,
+        "ease": "ease_in_quad",
+        "roll": 0.819
+      },
+      {
+        "at": 296.33,
+        "duration": 0.28,
+        "ease": "ease_out_quad",
         "roll": 0.04
       },
       {
-        "at": 296.335,
+        "at": 296.63,
         "duration": 1.1,
         "ease": "ease_out_quad",
         "target": [
@@ -3836,10 +4062,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -3922,10 +4148,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -4008,10 +4234,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }
@@ -4035,7 +4261,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 31.4,
-          "fade_out_at": 39.265,
+          "fade_out_at": 39.465,
           "fade_out": 0.45
         },
         {
@@ -4101,10 +4327,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#f3e9ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#d026ff",
           "width": 0.02,
           "strength": 1
         }
@@ -4194,10 +4420,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#eafff3",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#26ffcb",
           "width": 0.02,
           "strength": 1
         }
@@ -4217,7 +4443,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 53.92,
-          "fade_out_at": 61.095,
+          "fade_out_at": 61.195,
           "fade_out": 0.45
         },
         {
@@ -4280,10 +4506,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffe9ec",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff5026",
           "width": 0.02,
           "strength": 1
         }
@@ -4303,7 +4529,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 61.89,
-          "fade_out_at": 68.875,
+          "fade_out_at": 68.985,
           "fade_out": 0.45
         },
         {
@@ -4361,10 +4587,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -4388,7 +4614,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 69.67,
-          "fade_out_at": 76.84,
+          "fade_out_at": 76.94,
           "fade_out": 0.45
         },
         {
@@ -4450,10 +4676,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -4465,7 +4691,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 77.66,
-          "fade_out_at": 83.195,
+          "fade_out_at": 83.495,
           "fade_out": 0.45
         },
         {
@@ -4524,10 +4750,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }
@@ -4547,7 +4773,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 84.12,
-          "fade_out_at": 91.825,
+          "fade_out_at": 91.925,
           "fade_out": 0.45
         },
         {
@@ -4608,10 +4834,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#f3e9ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#d026ff",
           "width": 0.02,
           "strength": 1
         }
@@ -4635,7 +4861,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 92.56,
-          "fade_out_at": 99.493,
+          "fade_out_at": 99.454,
           "fade_out": 0.45
         },
         {
@@ -4693,10 +4919,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#eafff3",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#26ffcb",
           "width": 0.02,
           "strength": 1
         }
@@ -4716,7 +4942,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 100.17,
-          "fade_out_at": 107.515,
+          "fade_out_at": 107.615,
           "fade_out": 0.45
         },
         {
@@ -4775,10 +5001,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffe9ec",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff5026",
           "width": 0.02,
           "strength": 1
         }
@@ -4800,7 +5026,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 108.3,
-          "fade_out_at": 113.895,
+          "fade_out_at": 113.995,
           "fade_out": 0.45
         },
         {
@@ -4858,10 +5084,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -4873,7 +5099,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 114.63,
-          "fade_out_at": 121.655,
+          "fade_out_at": 121.855,
           "fade_out": 0.45
         },
         {
@@ -4936,10 +5162,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -4959,7 +5185,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 122.53,
-          "fade_out_at": 128.765,
+          "fade_out_at": 128.865,
           "fade_out": 0.45
         },
         {
@@ -5022,10 +5248,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }
@@ -5037,7 +5263,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 129.58,
-          "fade_out_at": 137.465,
+          "fade_out_at": 137.665,
           "fade_out": 0.45
         },
         {
@@ -5103,10 +5329,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#f3e9ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#d026ff",
           "width": 0.02,
           "strength": 1
         }
@@ -5130,7 +5356,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 138.3,
-          "fade_out_at": 167.233,
+          "fade_out_at": 167.41,
           "fade_out": 0.45
         },
         {
@@ -5196,10 +5422,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#eafff3",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#26ffcb",
           "width": 0.02,
           "strength": 1
         }
@@ -5221,7 +5447,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 168.1,
-          "fade_out_at": 174.965,
+          "fade_out_at": 175.165,
           "fade_out": 0.45
         },
         {
@@ -5284,10 +5510,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffe9ec",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff5026",
           "width": 0.02,
           "strength": 1
         }
@@ -5311,7 +5537,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 175.8,
-          "fade_out_at": 181.921,
+          "fade_out_at": 182.221,
           "fade_out": 0.45
         },
         {
@@ -5368,10 +5594,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -5455,10 +5681,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -5478,7 +5704,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 191.58,
-          "fade_out_at": 197.935,
+          "fade_out_at": 198.035,
           "fade_out": 0.45
         },
         {
@@ -5537,10 +5763,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }
@@ -5552,7 +5778,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 198.72,
-          "fade_out_at": 205.685,
+          "fade_out_at": 205.885,
           "fade_out": 0.45
         },
         {
@@ -5612,10 +5838,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#f3e9ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#d026ff",
           "width": 0.02,
           "strength": 1
         }
@@ -5639,7 +5865,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 206.55,
-          "fade_out_at": 213.468,
+          "fade_out_at": 213.568,
           "fade_out": 0.45
         },
         {
@@ -5697,10 +5923,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#eafff3",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#26ffcb",
           "width": 0.02,
           "strength": 1
         }
@@ -5781,10 +6007,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffe9ec",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff5026",
           "width": 0.02,
           "strength": 1
         }
@@ -5804,7 +6030,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 222.21,
-          "fade_out_at": 228.115,
+          "fade_out_at": 228.215,
           "fade_out": 0.45
         },
         {
@@ -5862,10 +6088,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -5885,7 +6111,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 228.88,
-          "fade_out_at": 236.045,
+          "fade_out_at": 236.145,
           "fade_out": 0.45
         },
         {
@@ -5948,10 +6174,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -6038,10 +6264,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }
@@ -6119,10 +6345,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#f3e9ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#d026ff",
           "width": 0.02,
           "strength": 1
         }
@@ -6146,7 +6372,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 252.23,
-          "fade_out_at": 263.451,
+          "fade_out_at": 263.607,
           "fade_out": 0.45
         },
         {
@@ -6212,10 +6438,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#eafff3",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#26ffcb",
           "width": 0.02,
           "strength": 1
         }
@@ -6227,7 +6453,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 264.29,
-          "fade_out_at": 271.248,
+          "fade_out_at": 271.385,
           "fade_out": 0.45
         },
         {
@@ -6290,10 +6516,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffe9ec",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff5026",
           "width": 0.02,
           "strength": 1
         }
@@ -6376,10 +6602,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#ffeef7",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#ff2954",
           "width": 0.02,
           "strength": 1
         }
@@ -6399,7 +6625,7 @@
           "duration": 0.3,
           "stagger": 0.04,
           "start_at": 278.85,
-          "fade_out_at": 280.435,
+          "fade_out_at": 280.635,
           "fade_out": 0.45
         },
         {
@@ -6449,10 +6675,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#e8f6ff",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#2562ff",
           "width": 0.02,
           "strength": 1
         }
@@ -6536,10 +6762,10 @@
       ],
       "material": {
         "type": "neon",
-        "color": "#eafcff",
+        "color": "#fff6e0",
         "strength": 1.6,
         "outline": {
-          "color": "#6bd9ff",
+          "color": "#f6ff20",
           "width": 0.02,
           "strength": 1
         }

@@ -1035,3 +1035,169 @@ map 应一次给全，事后 `mat.uniforms.x = …` 虽然可行但可读性差�
 `out/鸟之诗-v9.mp4`：00:06:07.00，1920×1080 60 fps，H.264 High + AAC
 192 kb/s，217.0 MB。复现：`node target/chamina/_regen_v8.mjs`（参数未变）
 + `node js/audio-env.mjs 鸟之诗.mp3` + `render.js --audio-env …`。
+
+
+## 十二、v10：90° 甩镜转场 + 彩虹音频可视化 + 按行配色（本轮）
+
+**12.1 需求**（用户）：① 相机旋转 90° 力量感转场、字体出现方向跟随相机；
+② 结尾频谱环彩虹 shader 不断变色；③ 新增 3D 频谱条；④ 开头加一个略后倾
+的频谱环；⑤ 转场防重复、随音乐情绪调整，加粒子特效与简单绘图；⑥ 文字
+不要纯白，按浪漫/美观/炫酷调色；⑦ 直接生成不用确认。渲染中途用户补充：
+成片 30fps 即可；之后要把性能升级、全部迁移出浏览器（→ docs/cpp-migration.md）。
+
+**12.2 甩镜转场（`js/layout.mjs`）**
+- `layoutField` 新增 `whip`（0..1）与 `energy`（每行 0..1 音频能量）与
+  `whipForce`（作者指定行）。转场分两类：
+  - **flight whip**：能量 ≥0.52 的行，转场飞行分三段 stop——`ease_in_quad`
+    把 roll 荡到 ±(58°~90°)（幅度随能量），`back_out` 带过冲地甩回落点
+    （正好踩在 cue 上），cue+0.08 后一段小 settle 回到水平（钳制 0.55s，
+    不许侵入下一句的飞行与回标题段）。
+  - **词间隙 whip**：能量 ≥0.78（或第 0 行/whipForce 行）的最宽词间隙
+    （≥1.0s）里，一次 0.5·whip±0.35 的小甩，词落下时回正。
+- **全局符号交替**：所有甩镜共用一个 `whipSign`，**在发射成功时才翻号**
+  （被时间约束毙掉的甩镜不消耗交替）——首版在决策期翻号导致相邻同向，
+  测试抓出后修正。
+- **开场特例**：第 0 行必甩（20.0s 处 81.6°，正好「我们」在 20.26 落拍时
+  回正——用户示例点名 f1 飞鸟 → f2 旋转九十度「张开」的力量感）。
+- `--force-whip <txt>`（可重复）：副歌钩子「飞鸟」4 次（行 1/13/25/29）
+  全部强制纳入（其中两次能量不足）。
+- 实测 bird.json：314 stops / 41 次甩镜 / 交替违规 0。
+
+**12.3 字体跟随相机（`js/scene.js::setFrame`）**
+- `updateCamera` 存 `state.camRoll`（stops+shake 的本帧 roll）；
+  `buildText` 给每字解出 `landsAt`（fade 延迟网格，词级戳兼容）。
+- 字点亮后 1.05s 窗口内：前 0.45s 完全跟随 camRoll（`mesh.rotateZ`），
+  之后 0.6s smoothstep 回平——字**随相机旋转出现、随相机回正落平**。
+- 静帧验证 t=20.35：相机 roll 0.672rad，旧行斜转、新词水平 ✓。
+
+**12.4 音频可视化全家桶（`js/scene.js::buildAudioViz`，audioenv 门控）**
+- **彩虹频谱环 ×2**：`makeSpectrumRing` 参数化（中心/半径/倾角/窗口/速度）。
+  颜色改为**顶点侧 HSV**：hue = band/64 + t·hueSpeed，片元直接用——逐点
+  而非逐像素（SwiftShader 逐像素噪声的天坑教训，§5.15）。尾环（0,0.8,-1.2
+  r4.0→5.6）+ **开头环**（0,0.55,-1.9，r2.9→4.3，tilt -0.15 后倾，随标题卡
+  淡入 2.0s→首句前 0.7s 淡出）。
+- **3D 频谱条**：`makeSpectrumBars`——64 根 InstancedMesh 盒子围成 6.05
+  半径的冠（tilt -0.1），每帧按 band 拉伸+HSL 染色+慢旋，尾卡期间与环同窗。
+- **火花**（`makeCueSparks`）：每块文本 14 粒尘埃，**吃每行自己的调色板色**
+  ，cue 时刻起爆、寿命 1.15s，全生命周期在 shader 里由 uT 和每粒戳计算
+  （零跨帧状态，seek 确定性）。
+- **风线**（`makeStreaks`）：26 根切向长条绕注视点成环，平时隐形；
+  |roll|>0.22 才渐显并随 roll 旋转——90° 甩镜因此有速度线的「绘图感」。
+- 粒子云呼吸窗口 = 两个环窗口的并集；`updateEnvFrame` 每帧先取包络再驱动
+  相机（seek 精确）。
+- A/B 开关：`norings/nobars/nosparks/nostreaks`（url 参数）。
+- **情绪化 FX**：cue punch 与闪白按当帧平均能量 `energyNow` 缩放
+  （0.55+0.45·E / 0.45+0.55·E），安静段落轻、副歌满。
+
+**12.5 按行配色（`js/lrc.js` + `--palette`）**
+- `hexHsl/hslHex` 往返 + `applyPalette`：逐行循环指定色板，描边自动跟随
+  每行色相（+0.055 偏移、饱和 ×1.6+0.18、亮度 ×0.6 → 深色轮廓）。
+- v10 色板：`#ffeef7,#e8f6ff,#fff6e0,#f3e9ff,#eafff3,#ffe9ec`（樱粉/冰蓝/
+  奶油/雾紫/薄荷/桃粉的极淡彩），描边实测 `#ff2954,#2562ff,#f6ff20,…`。
+- 像素双路确认（JSON 逐行 + 静帧扫描亮像素色族）。
+
+**12.6 CLI/工具链**
+- `lrc2scene` 新旗标：`--palette`、`--roll-power`、`--energy-file`、
+  `--force-whip`、`--fps <n>`（30 → total_frames 减半；全部缺省时输出
+  逐字节不变，回归已验）。
+- `loadEnergy`：cue ±(0.8/1.5)s 窗口的包络均值，全曲 min-max 归一。
+- `render.js --browser-arg <a>`（可重复）透传浏览器参数；
+  `editor-check.mjs` 支持 `CHAMINA_BROWSER`。
+
+**12.7 测试与回归**
+- `node --test` layout+lrc+anim **96/96**（新增：无能量不变、±90° 与交替、
+  settle 不越界、能量门控、force-whip、hexHsl 往返、applyPalette）；
+  `cargo test` 32+1；clippy 0。
+- 字节回归：无新旗标重生成 = `7965A151…` 逐字节一致 ✓。
+- `--probe cues` 37/37；editor-check 542 glyphs 无 page error。
+- 静帧核对：t=8（开场环四色族）/ t=20.35（甩镜跟随）/ t=27.9（钩子甩镜
+  进入）/ t=325（尾环+频谱条+标题卡）/ t=340（静音段呼吸）。
+
+**12.8 ⚠ 浏览器事件（重要，后续会话必读）**
+- Edge 升到 156.0.4314.42 后 **headless 自动化彻底失效**：启动即退
+  `Code: 0`，pipe/port、独立 profile、`--headless=new` 全试过；与用户的
+  Edge 是否运行无关。
+- chrome-headless-shell 156.0.8078.47（`@puppeteer/browsers` 装到
+  `D:/pbrowsers/`，ASCII 路径）可启动，但 SwiftShader 只有 **0.36fps**
+  （Chromium 156 软件路径回退，v9 时代 Edge 是 3.5）。
+- **`--gpu`（D3D11）= 1.93fps**，当前可用最快通路。A/B/C 对照证明 v10
+  新特效只吃 ~5%（0.38→0.36），锅全在浏览器。
+- chrome@stable 完整版下载失败（provider 404，buildId 8078.47 无 win64
+  chrome 包）；未再追。
+- **根治 = docs/cpp-migration.md（Rust+wgpu 原生渲染器，六里程碑）**。
+
+**12.9 渲染参数**
+- 用户确认 **30fps 成片**：`--fps 30` → 11010 帧（60fps 的一半）；
+  动画全为时间基准，30fps 只是隔帧采样同一条时间线。
+- 5 段 × 2202 帧，端口 8830+，`CHAMINA_BROWSER` 指向 headless-shell +
+  `--gpu` + `--audio-env target/chamina/audio_env.json`。
+- 复现：`node target/chamina/_regen_v10.mjs`（v9 全参 + `--layout field
+  --groups auto --roll-power 1 --energy-file … --force-whip 飞鸟 --palette …
+  --fps 30`）+ `node js/audio-env.mjs 鸟之诗.mp3` + render.js `--gpu`。
+
+**12.10 成片**
+
+**`out/鸟之诗-v10.mp4` 已交付（205.7 MB，当前成片）**：
+00:06:07.00 / 1920×1080 **30 fps** / H.264 High yuv420p / AAC-LC 48kHz stereo
+192 kb/s（mean_volume −13.4 dB，音轨在位）。
+分段实绩：p0 2.18 / p1 3.10 / p2 3.26 / p3 3.47 / p4 2.95 fps——**纯渲染
+67 分钟**（v9 同内容 60fps 要 ~2h；另有一次 p0 首启 D3D11 竞态掉进软件
+路径 0.5fps 跑了 1.5h 后被杀掉重跑，**每段必须盯首 3 分钟的 fps 日志，
+<1fps 立即杀掉重启**）。成片抽帧 t=8（开场彩虹环 4 色族）/ t=20.35（甩镜
+跟随落平）/ t=325 / 340（尾环+频谱条）全部核对通过。
+中间产物：`target/chamina/v10_p0..4.mp4` + `v10_concat.txt` →
+`bird_v10.mp4`（无音轨母版 206.7MB）；性能样板 `_bA.._bE.mp4`、
+`v10_bench_*.mp4`、静帧 `v10s_*.png` / `final_*.png`（可清理）。
+
+
+
+## 十三、原生渲染器（去浏览器化）—— v10 当晚落地
+
+**13.1 动机**：§12.8 的浏览器事件（Edge 156 失效 + SwiftShader 10 倍掉速）
+证明管线命脉握在浏览器版本手里。用户拍板：全部迁移，重写一切。
+方案见 docs/cpp-migration.md——关键判断：chamina 的 Rust 库已是全部计算层
+（动画求值 eval_all_timed 直接复用），缺的只是渲染层，故用 **纯 Rust 软件
+光栅**（rayon 并行）而非 C++ 全重写或 wgpu（零驱动依赖、确定性、可拿成片
+静帧当金标准逐帧验收；热点阶段未来可换 wgpu）。
+
+**13.2 实现**（src/native/，约 1900 行）：
+- mod.rs：SceneData 反序列化（export.rs 四个桥接结构补 Deserialize）、
+  eval_orbit/shake/punch 移植（与 js/anim.mjs 逐位一致，probe 数值锚点验证）、
+  背景时间线移植、音频包络、render_frame(t) 编排。
+- draw.rs：三角形光栅（alpha 混合+深度测试、世界空间法线背面剔除=倒置外壳）、
+  天空穹逐像素直译（fbm/星点/地平线）、smooth_hull 法线平均、粒子云
+  （mulberry32 逐位复刻）、双彩虹环（hsv2rgb 顶点侧）、3D 频谱条（实例化盒）、
+  火花（生命周期全在着色器公式里）、风线（解析式四边形填充）。
+- post.rs：bloom（UnrealBloom 高通=过阈值保留整个 texel + 逐 mip 加宽核 +
+  强度校准 gain）→ DOF（BokehShader 41-tap 平均的 1/4/8σ 三级近似）→
+  ACES(Hill)+sRGB → grade（色差/暗角/饱和/闪白按能量缩放）。
+- pipe.rs + bin/chamina-native：ffmpeg rawvideo 管道、
+  --still/--png/--from/--frames/--audio-env/-o、NATIVE_PROFILE 分段计时、
+  NATIVE_BLOOM_GAIN 校准旋钮。
+
+**13.3 移植抓出的浏览器侧事实**（全部像素级证据）：
+1. camera.rotateZ 必须烘进投影基——否则甩镜帧世界不倾斜（t=20.35 对照）。
+2. UnrealBloom 高通保留整个 texel（非减阈值）；核宽随 mip 指数增长。
+3. BokehShader 41-tap 平均 ÷41、tap 长 0.4 → 本场景最大虚化仅 ~6px。
+4. js/scene.js ringStart bug：start_at>60 命中 61.9s 歌词（环在原点才没穿帮，
+   但粒子呼吸窗口全程开着）——原生按「无 char_times 的卡」判定 318s，
+   scene.js 已同步修正（v10 成片未重渲，影响仅为粒子呼吸多开 4 分钟）。
+
+**13.4 验收**（金标准=v10 成片抽帧）：相机 t=8/17/20.35 逐位一致；
+t=325 区域均值比 0.97、t=20.35 甩镜 0.86、t=8 0.75（bloom 光晕边缘 ~1.4x，
+视觉等价）；甩镜方向/词级节奏/配色/环色族结构核对通过。
+cargo 32+1、clippy 0、fmt clean；JS 94/94。
+
+**13.5 性能**：首版 0.42fps——元凶是 finish() 里每帧 24MB 的 par collect，
+改 bloom 内缩放+原地加法后 **2.4-2.7fps**（天空穹 132ms/文字+可视化 10ms/
+bloom 75ms/DOF 39ms/tonemap+grade 114ms）。全片 11010 帧约 73 分钟，
+零外部依赖（无浏览器、无 GPU 驱动）。热点可 wgpu 化再提 3-5 倍（见 cpp-migration.md 遗留）。
+
+**13.6 成片**
+
+**out/鸟之诗-v10-native.mp4 已交付（286.9 MB，原生渲染器首个成片）**：
+00:06:07.00 / 1920×1080 30fps / H.264 High / AAC 192kb/s（mean_volume
+−13.4 dB）。母版 target/chamina/native_v10.mp4（11010 帧 / 2.24fps /
+81.8 分钟纯渲染 / 291.7MB）。终帧亮度对照：t=8 0.74 / t=20.35 0.85 /
+t=325 0.95（与浏览器金标准之比）。抽帧存 target/chamina/native_final_*.png。
+复现：chamina-render --dry-run → chamina-native --audio-env -o → mux-audio。

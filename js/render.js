@@ -59,6 +59,7 @@ function parseArgs(argv) {
     audio: null,
   audioEnv: null,
     gpu: false,
+    browserArg: [],
     probe: null,
     help: false,
   };
@@ -83,6 +84,7 @@ function parseArgs(argv) {
       case '--audio': o.audio = next(); break;
     case '--audio-env': o.audioEnv = next(); break;
       case '--gpu': o.gpu = true; break;
+      case '--browser-arg': o.browserArg.push(next()); break;
       case '--probe': o.probe = next(); break;
       case '-h':
       case '--help': o.help = true; break;
@@ -317,6 +319,10 @@ async function main() {
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
       `--window-size=${width},${height}`,
+      // Escape hatch for browser regressions: an ANGLE backend pin, a newer
+      // SwiftShader mode, whatever the launch needs that puppeteer shouldn't
+      // hard-code.
+      ...(opts.browserArg || []),
     ],
   });
 

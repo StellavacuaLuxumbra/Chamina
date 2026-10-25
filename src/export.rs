@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::animation::AnimationSpec;
 use crate::color::Color;
@@ -20,14 +20,14 @@ use crate::scene::{
 use crate::text::{build_char_mesh, chain_for, layout_line};
 
 /// The whole document handed to the renderer.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SceneData {
     pub meta: Meta,
     pub texts: Vec<TextExport>,
 }
 
 /// Video-level settings.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
     pub width: u32,
     pub height: u32,
@@ -51,7 +51,7 @@ pub struct Meta {
 }
 
 /// One text line: placement + styling + its characters.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TextExport {
     pub index: usize,
     pub text: String,
@@ -77,7 +77,7 @@ pub struct TextExport {
 }
 
 /// One extruded glyph, ready to upload as a BufferGeometry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CharExport {
     /// The character itself (as a string, so surrogates stay valid JSON).
     pub ch: String,

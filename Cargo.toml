@@ -10,6 +10,7 @@ categories = ["multimedia::video", "game-engines", "graphics"]
 readme = "README.md"
 
 [dependencies]
+rayon = "1"
 # Text / geometry
 ttf-parser = "0.25"
 # 2D polygon tessellation (glyph outlines -> triangles), incl. holes/Euler paths.

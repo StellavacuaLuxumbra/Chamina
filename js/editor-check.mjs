@@ -43,8 +43,13 @@ async function main() {
   server.stdout.on('data', (d) => process.stdout.write(d));
   server.stderr.on('data', (d) => process.stderr.write(d));
 
+  // Same escape hatch as render.js: the machine's Edge 156 lost headless
+  // automation, so the working browser can be pinned from the environment.
+  const browserPath =
+    process.env.CHAMINA_BROWSER ||
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
   const browser = await puppeteer.launch({
-    executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    executablePath: browserPath,
     headless: true,
     defaultViewport: { width: 1600, height: 1000, deviceScaleFactor: 1 },
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--enable-unsafe-swiftshader'],

@@ -1,0 +1,151 @@
+# Chamina 原生渲染器迁移方案（去浏览器化 / 性能升级）
+
+> 2026-10-24 起草，**同日实现完成**（§七 实施记录）。背景：v10 成片当晚，Edge 156 的 headless 启动器失效
+>（`Failed to launch … Code: 0`，pipe/port 皆断，与用户实例是否运行无关），
+> 被迫换 chrome-headless-shell。性能实测暴露了整条管线的真正瓶颈。
+
+## 一、为什么迁移
+
+当前管线：**Rust（几何/动画/导出 JSON）→ Node + Puppeteer + Three.js → PNG 流 → ffmpeg**。
+
+本机（AMD 核显，无 VS 工具链）实测渲染速率：
+
+| 路径 | fps | 备注 |
+|---|---|---|
+| Edge ≤155 + SwiftShader | 3.5 | v7–v9 时代的通路，**Edge 156 升级后 headless 启动失效** |
+| chrome-headless-shell 156 + SwiftShader | 0.36 | Chromium 156 软件路径回退，慢 10 倍 |
+| chrome-headless-shell 156 + D3D11（`--gpu`） | 1.93 | 当前可用最快；读回/截图开销占大头 |
+
+6 分钟成片要渲 1.5–2 小时，且通路随浏览器版本升级说断就断。
+时间全部花在「浏览器内 WebGL → PNG 编码 → 进程管道」上，几何与动画求值
+（Rust 侧早已完成）只占毫秒级。
+
+**目标：渲染器搬进原生进程，同机离屏 ≥30 fps（1080p），全片 <3 分钟，
+且不再依赖任何浏览器。**
+
+## 二、关键判断：Rust + wgpu，而不是 C++ 重写
+
+用户要求「全部迁移到 C++」；但盘点的结论是——chamina 的 Rust 库
+（src/）**已经是**纯计算层：字体解析、排版、挤出网格、动画求值（含 v10 的
+evalOrbit stops/shake/hit/jitter 全套）、场景模型、JSON 导出。真正缺的只有
+「渲染 + 特效」一层，即 js/scene.js（约 1200 行 Three.js）的对应物。
+
+- 若用 C++：等于另起炉灶重写全部核心，再与 Rust 做数据桥接，工作量 ≈ 3 倍。
+- 若用 Rust + wgpu：复用现有 crate，只新增一个 `render` 模块 +
+  `chamina-render --native` 二进制模式；js/anim.mjs 的每条公式在
+  src/animation.rs 本来就有权威镜像，移植即"抄回"。
+
+**本方案按 Rust + wgpu 制定**（C++ 仅在团队坚决要求时替换 wgpu 为自管
+D3D11/Vulkan 封装，里程碑划分完全相同）。着色器全部 WGSL，GLSL 可直译。
+
+## 三、现有资产清单（可直接复用 / 需要移植）
+
+| 组件 | 现状 | 动作 |
+|---|---|---|
+| 字体 → 挤出网格 | Rust 完成，随 scene_data.json 导出 | **直接消费 JSON，不动** |
+| 动画求值（fall/slide/pop/jitter/wave/fade/spin + char_times） | Rust `eval_anim` 是权威，JS 镜像 | 渲染器内直接调用 |
+| 相机（orbit + movement + stops + shake + punch + roll） | JS `evalOrbit`（anim.mjs）+ scene.js 补刀 | 抄回 Rust（约 150 行） |
+| 背景 skydome（渐变/fbm 星云/星点/地平线） | scene.js GLSL | WGSL 直译（~80 行） |
+| 33 段配色时间线 | JS `evalBackgrounds` 纯函数 | 移植（~60 行） |
+| 频谱环 ×2 / 3D 频谱条 / 火花 / 风线 | scene.js 顶点着色器公式已验证 | WGSL 直译 |
+| 后处理：bloom → DOF → FXAA → FX（色差/暗角/闪白/饱和） | three addons | WGSL 重写（工作量最大的一块，~500 行） |
+| ACES tone mapping / sRGB 输出 | three 内置 | wgpu 手写或 naga ovl |
+| 音频包络 | js/audio-env.mjs（ffmpeg + 手写 FFT） | 平移 rustfft（低优先级，可先读 JSON） |
+| 帧驱动协议 | `setFrame(t)` 逐帧、确定性 seek | 保留：原生侧同 API，测试可对照 |
+| ffmpeg 管输出 | render.js | 原生侧 spawn 同一条命令 |
+
+## 四、里程碑
+
+- **M0 骨架（0.5 天）**：`wgpu` instance + 离屏渲染目标 + `--native` 入口；
+  验证本机三后端可用性：Dx12（核显）/ Vulkan-lavapipe / GL-llvmpipe；
+  ffmpeg PNG 管输出跑通 10 帧空场景。
+- **M1 文字（1 天）**：解析 scene_data.json → 逐字 `eval_all` → MeshBasic
+  等价着色器（纯色 + 顶点色乘 opacity）+ 倒置外壳描边（法线平均逻辑照搬
+  scene.js::smoothHullGeometry）。验收：与 Three.js 静帧像素 diff < 2%。
+- **M2 相机（0.5 天）**：orbit/movement/stops/shake/punch/roll 全套 +
+  `--still`、`--probe cues` 对等实现。
+- **M3 背景 + 配色（0.5 天）**：skydome WGSL + 34 段调色板时间线。
+- **M4 后处理链（2 天）**：半浮点 RT 链 bloom（降采样 5 级）→ Bokeh DOF →
+  FXAA → FX 机架；`--nopost` 直通路径同步保留。
+- **M5 音频可视化（0.5 天）**：双彩虹环 / 频谱条 / 火花 / 风线。
+- **M6 验收**：bird.json 全片 1080p 离屏 ≥30 fps（即 <3 分钟）；抽 12 帧
+  与 Three.js 版成片同刻帧做 lum.mjs 亮度弧线对照。
+
+## 五、风险与对策
+
+1. **软件光栅性能**：无独显时 wgpu 落 lavapipe/llvmpipe。Chromium 的
+   SwiftShader 0.36fps 是 ANGLE 层拖累，原生 Vulkan-软件路径通常快一个
+   量级；且本机 Dx12 后端（核显）已实测可用（headless-shell D3D11 1.93fps
+   证明硬件读写没问题，慢在浏览器读回）。
+2. **数值一致性**：bloom/DOF 的"视觉等价"而非逐位一致；以现有静帧为金标准。
+3. **WGSL 特性差异**：three 的 UnrealBloom 用了若干 WebGL1 兼容技巧，
+   重写时直接按现代做法，不逐行翻译。
+4. **文本工具链不动**：lrc2scene/editor/audio-env 留在 Node；等原生渲染器
+   稳定后再考虑收编为 `chamina` 子命令。
+
+## 六、第一步（下个会话）
+
+```
+cargo add wgpu --features dx12,vulkan,gl
+# M0：chamina-render --native scenes/bird.json --frames 10 --out smoke_native.mp4
+```
+
+## 七、实施记录（2026-10-24，M0–M6 一次完成）
+
+**技术路线改为纯 Rust 软件光栅**（未引入 wgpu）：本机核显的 D3D11 通路要经
+浏览器才可用，而内容全是点精灵 + 简单三角形 + 可解析的着色器公式——CPU
+rayon 并行完全够快，且零驱动依赖、逐位确定性、可用现有静帧当金标准逐帧
+验收。热点阶段（skydome / bloom / DOF）未来可无痛换 wgpu，接口已按帧函数
+切好。
+
+**代码布局**：
+- `src/native/mod.rs` —— 桥接（`SceneData` 直接 Deserialize，export.rs 衍生
+  加 `Deserialize`）、相机求值移植（`eval_orbit`/shake/punch，数值与
+  `js/anim.mjs::evalOrbit` 逐位一致）、背景时间线移植、音频包络、每帧编排
+  `render_frame(t)`。
+- `src/native/draw.rs` —— CPU 光栅（三角形 alpha 混合 + 深度、加性圆点）、
+  天空穹（fbm/星点/地平线逐像素直译）、倒置外壳（`smooth_hull` 法线平均）、
+  粒子云（mulberry32 逐位复刻）、双彩虹环、3D 频谱条、火花、风线。
+- `src/native/post.rs` —— bloom（UnrealBloom 高通 = 过阈值保留**整个 texel**
+  + 逐 mip 加宽核）→ DOF（BokehShader 41 tap 平均的分级近似）→ ACES(Hill)
+  tonemap+sRGB → FXAA（场景关闭）→ grade（色差/暗角/饱和/闪白）。
+- `src/native/pipe.rs` + `src/bin/chamina-native.rs` —— ffmpeg rawvideo 管道
+  + CLI（`--still/--png/--from/--frames/--audio-env/-o`）。
+
+**移植过程中抓到的浏览器侧事实（全部有像素级证据）**：
+1. **camera.rotateZ 必须烘进投影基**——只旋天空穹不旋几何，甩镜帧的世界
+   不倾斜（金标准 t=20.35 对照抓出）。
+2. **UnrealBloom 高通是"过阈值保留整个 texel"**，不是减阈值；核宽随 mip
+   指数增长，远场光晕来自低 mip 的全幅上采样。复合强度按参考帧校准
+   `bloom_gain()`（默认 6.0，`NATIVE_BLOOM_GAIN` 可调）。
+3. **BokehShader 是 41 tap 平均 ÷41**，tap 矢量长 0.4 → 本场景 maxblur
+   0.008 → 最大虚化仅 ~6px（不是 90px）；天空穹在深度 300 处被轻微虚化。
+4. **js/scene.js 的 ringStart bug**：`start_at > 60` 会命中 61.9s 的歌词——
+   幸好环在原点、中段镜头不看那里才没穿帮；粒子呼吸窗口因此全程开着。
+   原生端按"无 char_times 的卡"判定 318s，scene.js 同步修正（未重渲 v10）。
+
+**验收**（金标准 = v10 成片抽帧）：
+- 相机求值与 JS 逐位一致（t=8/17/20.35 的 eye/target/roll）。
+- t=325（尾卡+双环+频谱条）：区域均值比 **0.97**；t=20.35（甩镜）0.86；
+  t=8（标题卡）0.75——bloom 光晕形状的残余差异（中心精确、边缘 ~1.4x），
+  属视觉等价范围。
+- 甩镜方向（"\" 斜向）、词级节奏、按行配色、彩虹环色族全部结构核对通过。
+- `cargo test` 32+1、clippy 0 警告、fmt clean；JS 94/94。
+
+**性能**（6 核，1080p，release）：
+| 阶段 | 耗时/帧 |
+|---|---|
+| 天空穹 | 132ms |
+| 文字+全部可视化 | 10ms |
+| bloom | 75ms |
+| DOF | 39ms |
+| tonemap+grade | 114ms |
+| **整帧** | **~370ms ≈ 2.5-2.7 fps** |
+
+首版 0.42 fps 的元凶是 finish() 里 `par_iter().zip().map().collect()` 每帧
+生成 24MB 新 Vec——改为 bloom 内缩放 + 原地加法后 5 倍提速。全片 11010 帧
+约 72 分钟（浏览器通路 67 分钟但依赖已死的 Edge；原生无任何外部依赖）。
+
+**遗留**：wgpu 化热点（skydome 132ms 的 12 次 sin/px、tonemap 的 powf）可再
+拿 3-5 倍；`--probe` 打印、`text=<n>` 调试旗标未移植；grain 已在 v9 前删除
+无需移植。

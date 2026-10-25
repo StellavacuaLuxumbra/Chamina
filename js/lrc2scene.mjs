@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseLrc, applyOffset, suggestDuration, buildLyricTexts, buildTitleBlock, visibleWidth } from './lrc.js';
+import { parseLrc, applyOffset, suggestDuration, buildLyricTexts, buildTitleBlock, visibleWidth, applyPalette } from './lrc.js';
 import { layoutField } from './layout.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -125,6 +125,23 @@ const USAGE = `chamina lrc → scene
       --fx-vignette <n>  corner darkening 0..1 (default 0.55)
       --fx-chromatic <n> RGB split at the frame edge (default 0.0016)
       --fx-sat <n>       extra saturation, 1 = off (default 1.12)
+      --palette <hex,…>  cycle these colours across the lyric lines instead of
+                         one --color for all; the rim follows each line's tint
+                         (hue-shifted, deeper) when --outline is set
+      --roll-power <n>   0..1, how hard transitions may bank the camera. The
+                         energetic lines swing to ±90° mid-flight and unwind
+                         with a back-out ease onto the beat (default 0 = the
+                         plain eased flight of v9)
+      --energy-file <f>  per-frame spectrum envelope (js/audio-env.mjs output)
+                         the roll power is spent where the music is loud;
+                         required for --roll-power to tell lines apart
+      --force-whip <txt> a lyric line containing this text always earns the
+                         whip treatment, whatever the meter says (repeatable) —
+                         the chorus hook gets its gesture in every pass
+      --fps <n>          render fps for the output video (default = template's,
+                         60); animations are all time-based, so 30 just samples
+                         the same timeline every other frame and halves the
+                         render for motion that reads nearly identically
       --title <text>     opening title card shown before the first lyric
       --subtitle <text>  second line of the title card
       --title-in <sec>   title fade-in start (default 1.2)
@@ -192,6 +209,11 @@ function parseArgs(argv) {
     fxVignette: null,
     fxChromatic: null,
     fxSat: null,
+    palette: null,
+    rollPower: 0,
+    energyFile: null,
+    forceWhip: [],
+    fps: null,
     title: null,
     subtitle: null,
     titleIn: 1.2,
@@ -264,6 +286,11 @@ function parseArgs(argv) {
       case '--fx-vignette': o.fxVignette = Number(next()); break;
       case '--fx-chromatic': o.fxChromatic = Number(next()); break;
       case '--fx-sat': o.fxSat = Number(next()); break;
+      case '--palette': o.palette = next(); break;
+      case '--roll-power': o.rollPower = Number(next()); break;
+      case '--energy-file': o.energyFile = next(); break;
+      case '--force-whip': o.forceWhip.push(next()); break;
+      case '--fps': o.fps = Number(next()); break;
       case '--title': o.title = next(); break;
       case '--subtitle': o.subtitle = next(); break;
       case '--title-in': o.titleIn = Number(next()); break;
@@ -432,6 +459,41 @@ function applyCameraMotion(anim, duration, args) {
   return out;
 }
 
+/**
+ * Per-line audio energy in 0..1, read from the precomputed spectrum envelope:
+ * the mean band energy around each cue (0.8 s before, 1.5 s after), then
+ * normalised across the song so the loudest line is 1 and the quietest 0.
+ * The layout spends its camera whips where the music actually spends its
+ * energy, which is what keeps quiet passages gentle.
+ */
+function loadEnergy(file, lyricLines) {
+  const env = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!env || !Array.isArray(env.data) || !env.data.length) {
+    throw new Error(`--energy-file: ${file} has no envelope data`);
+  }
+  const fps = Number(env.fps) || 60;
+  const frames = env.data.length;
+  const raw = lyricLines.map((l) => {
+    const f0 = Math.max(0, Math.round((l.time - 0.8) * fps));
+    const f1 = Math.min(frames - 1, Math.round((l.time + 1.5) * fps));
+    let sum = 0;
+    let n = 0;
+    for (let f = f0; f <= f1; f++) {
+      const row = env.data[f];
+      if (!row || !row.length) continue;
+      let m = 0;
+      for (const v of row) m += v;
+      sum += m / row.length;
+      n++;
+    }
+    return n ? sum / n : 0;
+  });
+  const mn = Math.min(...raw);
+  const mx = Math.max(...raw);
+  const span = mx - mn > 1e-9 ? mx - mn : 1;
+  return raw.map((v) => Math.round(((v - mn) / span) * 1000) / 1000);
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || !args.input) {
@@ -488,6 +550,15 @@ function main() {
 
   // Only lines that actually render take part in the layout.
   const lyricLines = lines.filter((l) => l.text);
+  // Where the music is loud. Read before the layout so the roll budget is
+  // spent by the track itself; absent the flag no line is ever "energetic"
+  // and the camera path is exactly the one v9 laid out.
+  let energy = null;
+  if (args.energyFile) energy = loadEnergy(resolve(args.energyFile), lyricLines);
+  // Lines the author named for the whip treatment no matter the meter.
+  const whipForce = args.forceWhip.length
+    ? lyricLines.map((l) => args.forceWhip.some((txt) => l.text.includes(txt)))
+    : null;
   let layout = null;
   if (args.layout === 'field') {
     layout = layoutField(lyricLines, {
@@ -507,6 +578,9 @@ function main() {
       outroAt,
       titleOut,
       groups: args.groups,
+      whip: clamp(args.rollPower, 0, 1, 0),
+      energy,
+      whipForce,
     });
     cameraAnimation.stops = layout.stops;
   }
@@ -564,6 +638,9 @@ function main() {
       };
     }
   }
+  // Per-line colour cycle. Runs after the rim exists so the rim can follow
+  // each line's own tint; title/outro cards are built later and keep --color.
+  if (args.palette) applyPalette(texts, args.palette);
   if (args.keepOpen) {
     const last = texts[texts.length - 1];
     const fade = last.animations.find((a) => a.type === 'fade');
@@ -662,6 +739,9 @@ function main() {
   const scene = {
     ...template,
     duration,
+    // Sample the same timeline more sparsely; written only when asked for so
+    // existing scenes regenerate byte-identically.
+    ...(Number.isFinite(args.fps) && args.fps > 0 ? { fps: args.fps } : {}),
     work_dir: template.work_dir || 'target/chamina',
     camera_animation: cameraAnimation,
     // Both omitted entirely when the flags are absent — `undefined` keys drop

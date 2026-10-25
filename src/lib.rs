@@ -33,6 +33,7 @@ pub mod color;
 pub mod export;
 pub mod material;
 pub mod math;
+pub mod native;
 pub mod scene;
 pub mod text;
 
