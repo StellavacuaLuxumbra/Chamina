@@ -1201,3 +1201,36 @@ bloom 75ms/DOF 39ms/tonemap+grade 114ms）。全片 11010 帧约 73 分钟，
 81.8 分钟纯渲染 / 291.7MB）。终帧亮度对照：t=8 0.74 / t=20.35 0.85 /
 t=325 0.95（与浏览器金标准之比）。抽帧存 target/chamina/native_final_*.png。
 复现：chamina-render --dry-run → chamina-native --audio-env -o → mux-audio。
+
+
+## 十四、C++ 完整重写（字体/排版/动画/渲染全引擎）
+
+**14.1 决策**：用户确认「整个项目彻底 C++ 化」为最高优先级。经讨论选定
+「零负担单头文件栈」（stb_truetype + mapbox earcut + nlohmann/json +
+stb_image_write + OpenMP + ffmpeg 子进程；FreeType 留作 OTF/CFF 升级路径），
+全部单头 vendored 进 cpp/vendor/，MinGW g++ 15.2 -static 构建，无包管理器、
+无运行时 DLL。
+
+**14.2 实现**：cpp/src/chamina.cpp（单 TU 约 1900 行）——
+stbtt 轮廓（TTC/复合字形）→ 二次曲线展开（隐式 on-curve 中点）→ 孔洞
+even-odd 嵌套分类 → earcut 三角化 → 挤出（盖面翻绕序、侧壁边界边、法线
+第三点判外）→ smooth_hull 描边 → 排版（hmtx/line_center_y/fit_width）→
+动画求值（与 src/animation.rs 逐公式对齐）→ 相机（orbit/movement/stops
+yaw/roll 偏移/shake/punch 按能量）→ 软件光栅 + 全套可视化 + 后处理 →
+ffmpeg rawvideo 管道。`--still/--png/--from/--frames/-o`、CPP_TRACE、
+CPP_NOVIZ 调试开关。
+
+**14.3 修掉的三个移植 bug**（金标准对照暴露）：earcut 孔洞收集容器混用
+（越界段错误）；base_position 漏加 bbox 中心补偿（文字带 +27%）；stop 的
+yaw/roll 是偏移量而非替换（镜头朝向全错，t=20.35 相机 x/z 互换暴露）。
+
+**14.4 验收**：相机 t=20.35/325 与 JS 逐位一致；区域亮度比（C++/Rust，
+Rust 已对浏览器验收）t=8 天空 1.00/地平线 1.03/文字 1.02，t=20.35 全区
+0.97，t=325 全区 1.00。2.7-2.9 fps（OpenMP），快于 Rust 版 2.24。
+
+**14.5 成片**：out/鸟之诗-v10-cpp.mp4（混音自 target/chamina/cpp_v10.mp4，
+11010 帧 / 2.5fps / ~74 分钟纯渲染）。
+
+**14.6 三条等价通路**（同一场景 JSON → 同一画面，互为回归对照）：
+JS 浏览器（作者预览）/ Rust native（chamina-native.exe）/ C++ 全引擎
+（chamina-cpp.exe，渲染默认）。

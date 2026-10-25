@@ -149,3 +149,47 @@ rayon 并行完全够快，且零驱动依赖、逐位确定性、可用现有�
 **遗留**：wgpu 化热点（skydome 132ms 的 12 次 sin/px、tonemap 的 powf）可再
 拿 3-5 倍；`--probe` 打印、`text=<n>` 调试旗标未移植；grain 已在 v9 前删除
 无需移植。
+
+
+## 八、C++ 完整重写（2026-10-25，用户拍板「整个项目彻底 C++ 化」后落地）
+
+**技术栈（用户选定「零负担单头文件栈」）**：stb_truetype（TTC/复合字形/二次曲线）
++ mapbox earcut（EvenOdd 孔洞三角化）+ nlohmann/json + stb_image_write +
+OpenMP + ffmpeg 子进程。全部单头 vendored 进 cpp/vendor/，无包管理器。
+构建：g++ -O2 -std=c++17 -fopenmp -static -Icpp/vendor cpp/src/chamina.cpp
+（MinGW g++ 15.2，-static 消 DLL 依赖）。
+
+**cpp/src/chamina.cpp（单 TU，约 1900 行）**：
+- 字体：stbtt_GetGlyphShape 轮廓（复合字形/cmap 全由 stb 处理）→ 二次曲线
+  展开（连续 off-curve 取中点隐式 on-curve，10 段/quad）→ 孔洞按 even-odd
+  嵌套深度分类、每孔挂最近外环 → earcut 三角化 → 挤出（z=±h 对称、盖面
+  绕序翻转、侧壁从边界边生成、法线以第三点判外）→ smooth_hull 法线平均
+  膨胀（描边）。
+- 排版：hmtx 步进 em、line_center_y=(asc+desc)/2、x 居中、fit_width 缩放
+  （port of src/text/layout.rs + export::build）。
+- 动画/相机/背景/可视化/后处理：从 src/native（Rust）逐函数移植，公式与
+  js/anim.mjs 三方一致。
+
+**移植期修掉的三个 bug（都有金标准对照证据）**：
+1. earcut 前的孔洞收集写错容器（cut/rings 混用）→ 越界段错误。
+2. base_position 漏加 bbox 中心补偿（Rust 里 origin 在 base 与顶点两侧相消）
+   → 字形整体偏移、文字带亮度 +27%。
+3. **stop 的 yaw/roll 语义**：它们是轨道之上的偏移量（JS yawOff），初版写成
+   替换轨道 yaw → 中段全片镜头朝向错误（t=20.35 相机 x/z 互换暴露）。
+   修正为独立 yaw_off/roll_off 通道后相机与 JS 逐位一致。
+
+**验收**（金标准 = Rust 原生静帧，Rust 已对浏览器金标准验收过）：
+- 相机 t=20.35/325 eye/target/roll 逐位一致。
+- 区域亮度比：t=8 天空 1.00/地平线 1.03/文字带 1.02；t=20.35 全区 0.97；
+  t=325 全区 1.00。
+- 速度：2.7-2.9 fps（OpenMP 6 线程），全片 11010 帧约 68 分钟——比 Rust 版
+  2.24fps 更快。
+
+**交付（2026-10-25 终局：用户明确「只要软件，不要成片」）**：`cppuild.bat` → `distchamina-cpp.exe`（3.5MB 静态单文件，无 DLL 依赖）。
+用法/开关/架构见 `cpp/README.md`。全片渲染能力已验证可用（2.7-2.9fps）但按需执行，不再默认产出。
+
+**现在项目里有三条等价渲染通路**（同一场景 JSON → 同一画面）：
+1. JS + 浏览器（js/scene.js，作者工具链的原生预览）
+2. Rust 软件光栅（src/native，chamina-native.exe）
+3. **C++ 全引擎（cpp/src/chamina.cpp，chamina-cpp.exe）——字体/排版/动画/
+   渲染从此不依赖 Rust 与 Node**

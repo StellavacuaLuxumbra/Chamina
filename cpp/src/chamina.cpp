@@ -23,7 +23,6 @@
 #include <algorithm>
 #include <chrono>
 static bool TRACE = false;
-#define TRACE_P(msg) do { if (TRACE) { fprintf(stderr, "[trace] %s\n", msg); fflush(stderr); } } while(0)
 #include <tuple>
 #include <cmath>
 #ifndef M_PI
@@ -276,6 +275,9 @@ static Rig eval_orbit(const json& o, float t) {
                     o.at("target")[2].get<float>()};
     r.yaw = o.value("start_yaw", 0.0f) + o.value("speed", 0.0f) * t;
     r.roll = 0;
+    // Stops carry yaw/roll as OFFSETS on top of the orbit (js: yawOff/rollOff)
+    // — they must never replace the orbit's own yaw.
+    float yaw_off = 0, roll_off = 0;
     if (auto m = o.find("movement"); m != o.end() && m->is_object()) {
         float k = ease_apply(m->value("ease", "ease_in_out_cubic"),
                              (t - m->value("at", 0.0f)) / max(m->value("duration", 1.0f), 1e-6f));
@@ -306,16 +308,18 @@ static Rig eval_orbit(const json& o, float t) {
             if (tg != s.end() && tg->is_array())
                 tt = Vec3{(*tg)[0].get<float>(), (*tg)[1].get<float>(), (*tg)[2].get<float>()};
             auto yw = s.find("yaw");
-            float tyaw = yw != s.end() && yw->is_number() ? yw->get<float>() : r.yaw;
+            float tyaw = yw != s.end() && yw->is_number() ? yw->get<float>() : yaw_off;
             auto rl = s.find("roll");
-            float troll = rl != s.end() && rl->is_number() ? rl->get<float>() : r.roll;
+            float troll = rl != s.end() && rl->is_number() ? rl->get<float>() : roll_off;
             r.radius += (tr - r.radius) * k;
             r.elevation += (te2 - r.elevation) * k;
             r.target = r.target + (tt - r.target) * k;
-            r.yaw += (tyaw - r.yaw) * k;
-            r.roll += (troll - r.roll) * k;
+            yaw_off += (tyaw - yaw_off) * k;
+            roll_off += (troll - roll_off) * k;
         }
     }
+    r.yaw += yaw_off;
+    r.roll = roll_off;
     return r;
 }
 
@@ -1706,9 +1710,17 @@ static float mat_outline_width(const json& spec) {
 // ---------------------------------------------------------------------------
 
 static string find_ffmpeg() {
-    if (const char* p = getenv("CHAMINA_FFMPEG")) return p;
+    // cmd.exe (which popen shells out to) rejects forward slashes in the
+    // command position and mangles non-ASCII absolute paths, so candidates
+    // are normalised to backslashes — and the bundled installer copy wins.
+    auto norm = [](string p) {
+        for (auto& c : p)
+            if (c == '/') c = '\\';
+        return p;
+    };
+    if (const char* p = getenv("CHAMINA_FFMPEG")) return norm(p);
     for (auto rel : {"js/node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe"})
-        if (filesystem::exists(rel)) return rel;
+        if (filesystem::exists(rel)) return norm(rel);
     return "ffmpeg";
 }
 
@@ -1764,16 +1776,11 @@ int main(int argc, char** argv) {
 
     float duration = meta.at("total_frames").get<float>() / meta.at("fps").get<float>();
     (void)duration;
-    TRACE_P("prepare-begin");
     world.prepare({});
-    TRACE_P("prepare-done");
     // cues/outro/first-lyric are computed in prepare() — they need env-independent
     // info only, fine.
 
-    TRACE_P("texts-begin");
-    int __ti = 0;
     for (const auto& spec : scene.at("texts")) {
-        TRACE_P((string("text ") + std::to_string(__ti++)).c_str());
         PreparedText tx;
         tx.position = Vec3{spec.at("position")[0].get<float>(),
                            spec.at("position")[1].get<float>(),
@@ -1814,7 +1821,6 @@ int main(int argc, char** argv) {
             items.push_back({cp, glyph, adv, cursor + adv * 0.5f});
             cursor += adv;
         }
-        TRACE_P((string("layout-done items=") + std::to_string(items.size())).c_str());
         float total_width = cursor;
         float line_center_y = (max_asc + min_desc) * 0.5f;
         float half = total_width * 0.5f;
@@ -1903,9 +1909,7 @@ int main(int argc, char** argv) {
     count = min(count, total - from);
 
     if (still >= 0) {
-        TRACE_P("render-begin");
         Frame fr = world.render_frame(still);
-        TRACE_P("render-done");
         auto& fx = meta.at("fx");
         float flash = 0;
         if (fx.value("enabled", false)) {
@@ -1925,7 +1929,7 @@ int main(int argc, char** argv) {
                  " -framerate " + to_string(fps) + " -i pipe:0 -c:v libx264 -preset medium "
                  "-crf 18 -pix_fmt yuv420p -vf scale=trunc(iw/2)*2:trunc(ih/2)*2 "
                  "-movflags +faststart \"" + out + "\"";
-    FILE* pipe = _popen(cmd.c_str(), "wb");
+    FILE* pipe = popen(cmd.c_str(), "wb");
     if (!pipe) {
         fprintf(stderr, "cannot start ffmpeg\n");
         return 1;
@@ -1950,7 +1954,7 @@ int main(int argc, char** argv) {
                     i + 1, count, (i + 1) / el, el, el / (i + 1) * (count - i - 1));
         }
     }
-    _pclose(pipe);
+    pclose(pipe);
     double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
     fprintf(stderr, "[cpp] done -> %s  %u frames  %.2f fps\n", out.c_str(), count,
             count / el);
