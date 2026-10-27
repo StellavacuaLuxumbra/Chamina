@@ -1541,11 +1541,6 @@ struct World {
         }
     }
 
-    Frame render_frame(float t) const {
-        Frame f;
-        render_frame_into(t, f);
-        return f;
-    }
 };
 
 // ---------------------------------------------------------------------------
@@ -1554,27 +1549,24 @@ struct World {
 
 using Img = vector<array<float, 3>>;
 
-static Img blur(const Img& src, int w, int h, float sigma) {
+// Vertical gaussian blur into a caller-owned buffer. NOTE on semantics: the
+// Rust reference (src/native/post.rs blur) computes a horizontal pass into
+// `tmp` that its vertical pass never reads — the effective operation is
+// vertical-only, both implementations agree, and the accepted gold-standard
+// stills were rendered that way. The dead horizontal pass is skipped here.
+// All buffers persist across frames (sizes are constant per scene, so
+// resize() only allocates on the first call — was ~50MB of churn/frame).
+static void blur_into(const Img& src, int w, int h, float sigma, Img& out) {
     int radius = (int)ceilf(sigma * 2.5f);
-    vector<float> weights(radius + 1);
+    float weights[64];
+    if (radius > 63) radius = 63; // max sigma here is 16 -> r=40
     for (int i = 0; i <= radius; i++)
         weights[i] = expf(-((float)i * i) / (2 * sigma * sigma));
     float sum = 0;
-    for (float v : weights) sum += v;
+    for (int i = 0; i <= radius; i++) sum += weights[i];
     sum = sum * 2 - weights[0];
-    for (auto& v : weights) v /= sum;
-    Img tmp((size_t)w * h), out((size_t)w * h);
-#pragma omp parallel for schedule(static)
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++) {
-            float acc[3] = {0, 0, 0};
-            for (int i = 0; i <= radius; i++) {
-                auto& a = src[(size_t)y * w + min(x + i, w - 1)];
-                auto& b = src[(size_t)y * w + max(x - i, 0)];
-                for (int k = 0; k < 3; k++) acc[k] += (a[k] + b[k]) * weights[i];
-            }
-            tmp[(size_t)y * w + x] = {acc[0], acc[1], acc[2]};
-        }
+    for (int i = 0; i <= radius; i++) weights[i] /= sum;
+    if ((size_t)w * h > out.size()) out.resize((size_t)w * h);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
@@ -1586,15 +1578,20 @@ static Img blur(const Img& src, int w, int h, float sigma) {
             }
             out[(size_t)y * w + x] = {acc[0], acc[1], acc[2]};
         }
-    return out;
 }
 
 static float bloom_gain_global = 6.0f;
 
-static Img bloom(const Frame& f, float intensity, float threshold) {
+static void bloom(const Frame& f, float intensity, float threshold, Img& out_full) {
     int w = f.w, h = f.h;
     int hw = max(w / 2, 1), hh = max(h / 2, 1);
-    Img cur((size_t)hw * hh);
+    // All scratch persists across frames (constant sizes per scene). `in`
+    // doubles as the downsample target: resize() truncates logically without
+    // reallocating, and every consumer only touches [0, size).
+    static Img in;
+    static Img lv[5];   // blurred mip levels
+    static Img fold[5]; // cascade accumulators
+    if ((size_t)hw * hh > in.size()) in.resize((size_t)hw * hh);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < hh; y++)
         for (int x = 0; x < hw; x++) {
@@ -1607,18 +1604,16 @@ static Img bloom(const Frame& f, float intensity, float threshold) {
                     float alpha = kk * kk * (3 - 2 * kk);
                     for (int k = 0; k < 3; k++) acc[k] += c[k] * alpha;
                 }
-            cur[(size_t)y * hw + x] = {acc[0] * 0.25f, acc[1] * 0.25f, acc[2] * 0.25f};
+            in[(size_t)y * hw + x] = {acc[0] * 0.25f, acc[1] * 0.25f, acc[2] * 0.25f};
         }
-    vector<Img> levels;
     vector<pair<int, int>> sizes;
     int cw = hw, chh = hh;
     for (int i = 0; i < 5; i++) {
-        cur = blur(cur, cw, chh, (float)(1 << i));
-        levels.push_back(cur);
+        blur_into(in, cw, chh, (float)(1 << i), lv[i]);
         sizes.push_back({cw, chh});
         if (cw <= 2 || chh <= 2) break;
         int nw = max(cw / 2, 1), nh = max(chh / 2, 1);
-        Img down((size_t)nw * nh);
+        in.resize((size_t)nw * nh);
 #pragma omp parallel for schedule(static)
         for (int y = 0; y < nh; y++)
             for (int x = 0; x < nw; x++) {
@@ -1626,11 +1621,10 @@ static Img bloom(const Frame& f, float intensity, float threshold) {
                 for (int dy = 0; dy < 2; dy++)
                     for (int dx = 0; dx < 2; dx++)
                         for (int k = 0; k < 3; k++)
-                            acc[k] += cur[min(y * 2 + dy, chh - 1) * (size_t)cw +
-                                          min(x * 2 + dx, cw - 1)][k] * 0.25f;
-                down[(size_t)y * nw + x] = {acc[0], acc[1], acc[2]};
+                            acc[k] += lv[i][min(y * 2 + dy, chh - 1) * (size_t)cw +
+                                           min(x * 2 + dx, cw - 1)][k] * 0.25f;
+                in[(size_t)y * nw + x] = {acc[0], acc[1], acc[2]};
             }
-        cur = down;
         cw = nw;
         chh = nh;
     }
@@ -1640,8 +1634,8 @@ static Img bloom(const Frame& f, float intensity, float threshold) {
     // touch full resolution exactly once, instead of upsampling all five
     // levels to full res. Same soft result, a fifth of the traffic.
     auto upsample_into = [](Img& dst, int dw, int dh, const Img& src, int sw, int sh,
-                            float mul, const Img* add) {
-        dst.assign((size_t)dw * dh, {0, 0, 0});
+                            float mul) {
+        if ((size_t)dw * dh > dst.size()) dst.resize((size_t)dw * dh);
 #pragma omp parallel for schedule(static)
         for (int y = 0; y < dh; y++) {
             float fy = ((float)y + 0.5f) * sh / dh - 0.5f;
@@ -1662,41 +1656,39 @@ static Img bloom(const Frame& f, float intensity, float threshold) {
                     float top = a[kk] + (b[kk] - a[kk]) * tx;
                     float bot = c[kk] + (d[kk] - c[kk]) * tx;
                     o[kk] = (top + (bot - top) * ty) * mul;
-                    if (add) o[kk] += (*add)[(size_t)y * dw + x][kk];
                 }
             }
         }
     };
-    size_t n = levels.size();
-    Img acc;
+    size_t n = sizes.size();
     {
         auto [sw, sh] = sizes[n - 1];
-        upsample_into(acc, sw, sh, levels[n - 1], sw, sh,
-                      weights[min(n - 1, (size_t)4)] * k, nullptr);
+        upsample_into(fold[n - 1], sw, sh, lv[n - 1], sw, sh,
+                      weights[min(n - 1, (size_t)4)] * k);
     }
     for (int li = (int)n - 2; li >= 0; li--) {
         auto [dw, dh] = sizes[li];
         auto [sw, sh] = sizes[li + 1];
-        Img up;
-        upsample_into(up, dw, dh, acc, sw, sh, 1.0f, nullptr);
+        upsample_into(fold[li], dw, dh, fold[li + 1], sw, sh, 1.0f);
         // add this level's own (weighted) energy
 #pragma omp parallel for schedule(static)
-        for (long i = 0; i < (long)up.size(); i++)
+        for (long i = 0; i < (long)fold[li].size(); i++)
             for (int kk = 0; kk < 3; kk++)
-                up[i][kk] += levels[li][i][kk] * weights[min((size_t)li, (size_t)4)] * k;
-        acc = move(up);
+                fold[li][i][kk] += lv[li][i][kk] * weights[min((size_t)li, (size_t)4)] * k;
     }
-    Img out;
-    upsample_into(out, w, h, acc, sizes[0].first, sizes[0].second, 1.0f, nullptr);
-    return out;
+    upsample_into(out_full, w, h, fold[0], sizes[0].first, sizes[0].second, 1.0f);
 }
 
-static Img dof(const Img& color, const Frame& f, float focus, float aperture,
-               float maxblur) {
+static void dof(Frame& f, float focus, float aperture, float maxblur) {
     int w = f.w, h = f.h;
     int hw = max(w / 2, 1), hh = max(h / 2, 1);
-    vector<array<float, 3>> half((size_t)hw * hh);
-    vector<float> coc((size_t)hw * hh);
+    // Persist across frames (constant sizes per scene; was ~70MB churn/frame).
+    // The final pass reads f.color[i] and writes f.color[i] — per-pixel
+    // read-before-write, safe in place.
+    static Img half, b1, b2, b3;
+    static vector<float> coc;
+    if ((size_t)hw * hh > half.size()) half.resize((size_t)hw * hh);
+    if ((size_t)hw * hh > coc.size()) coc.resize((size_t)hw * hh);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < hh; y++)
         for (int x = 0; x < hw; x++) {
@@ -1704,7 +1696,7 @@ static Img dof(const Img& color, const Frame& f, float focus, float aperture,
             for (int dy = 0; dy < 2; dy++)
                 for (int dx = 0; dx < 2; dx++) {
                     size_t si = min(y * 2 + dy, h - 1) * (size_t)w + min(x * 2 + dx, w - 1);
-                    auto& c = color[si];
+                    auto& c = f.color[si];
                     for (int k = 0; k < 3; k++) acc[k] += c[k] * 0.25f;
                     float zc = f.depth[si];
                     float coc_uv = isfinite(zc)
@@ -1715,16 +1707,16 @@ static Img dof(const Img& color, const Frame& f, float focus, float aperture,
             half[(size_t)y * hw + x] = {acc[0], acc[1], acc[2]};
             coc[(size_t)y * hw + x] = cacc * 0.25f;
         }
-    Img b1 = blur(half, hw, hh, 1.0f), b2 = blur(half, hw, hh, 4.0f),
-        b3 = blur(half, hw, hh, 8.0f);
+    blur_into(half, hw, hh, 1.0f, b1);
+    blur_into(half, hw, hh, 4.0f, b2);
+    blur_into(half, hw, hh, 8.0f, b3);
     float coc_px = (float)w;
-    Img out((size_t)w * h);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             int hx = min(x / 2, hw - 1), hy = min(y / 2, hh - 1);
             float c01 = clamp(coc[(size_t)hy * hw + hx] * coc_px / 15.0f, 0.0f, 1.0f);
-            auto& src = color[(size_t)y * w + x];
+            auto& src = f.color[(size_t)y * w + x];
             size_t i = (size_t)hy * hw + hx;
             float w0, w1, w2, w3;
             if (c01 < 0.33f) {
@@ -1743,11 +1735,12 @@ static Img dof(const Img& color, const Frame& f, float focus, float aperture,
                 w2 = 1 - k;
                 w3 = k;
             }
-            auto& o = out[(size_t)y * w + x];
+            auto& o = src;
+            float r[3];
             for (int kk = 0; kk < 3; kk++)
-                o[kk] = src[kk] * w0 + b1[i][kk] * w1 + b2[i][kk] * w2 + b3[i][kk] * w3;
+                r[kk] = src[kk] * w0 + b1[i][kk] * w1 + b2[i][kk] * w2 + b3[i][kk] * w3;
+            for (int kk = 0; kk < 3; kk++) o[kk] = r[kk];
         }
-    return out;
 }
 
 // sRGB encode LUT: 4097 entries cover [0,1] finer than the 8-bit output, so
@@ -1796,9 +1789,9 @@ static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     return out;
 }
 
-static Img grade(const Img& src, int w, int h, float chromatic, float vignette,
-                 float saturation, float flash) {
-    Img out = src;
+static void grade_into(const Img& src, int w, int h, float chromatic, float vignette,
+                       float saturation, float flash, Img& out) {
+    if ((size_t)w * h > out.size()) out.resize((size_t)w * h);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
@@ -1822,41 +1815,47 @@ static Img grade(const Img& src, int w, int h, float chromatic, float vignette,
             }
             out[(size_t)y * w + x] = col;
         }
-    return out;
 }
 
-static vector<uint8_t> finish(const Frame& f, const json& meta, float flash) {
+// Full post chain, in place on f.color (safe: both paths consume the result
+// before the next frame re-renders it; the dome overwrites or the clear
+// resets every pixel). All intermediates persist across frames.
+static void finish(Frame& f, const json& meta, float flash, vector<uint8_t>& bytes) {
     int w = f.w, h = f.h;
-    Img img = f.color;
     if (meta.at("bloom").value("enabled", false)) {
-        Img bl = bloom(f, meta.at("bloom").at("intensity").get<float>(),
-                       meta.at("bloom").at("threshold").get<float>());
+        static Img bl;
+        bloom(f, meta.at("bloom").at("intensity").get<float>(),
+              meta.at("bloom").at("threshold").get<float>(), bl);
 #pragma omp parallel for schedule(static)
-        for (long i = 0; i < (long)img.size(); i++) {
-            img[i][0] += bl[i][0];
-            img[i][1] += bl[i][1];
-            img[i][2] += bl[i][2];
+        for (long i = 0; i < (long)f.color.size(); i++) {
+            f.color[i][0] += bl[i][0];
+            f.color[i][1] += bl[i][1];
+            f.color[i][2] += bl[i][2];
         }
     }
     auto& dof_j = meta.at("dof");
     if (dof_j.value("enabled", false)) {
         float aperture = 0.00017f * (4.0f / max(dof_j.at("aperture_f_stops").get<float>(), 0.1f));
         float maxblur = 0.008f * max(dof_j.at("focal_radius").get<float>(), 0.001f);
-        img = dof(img, f, dof_j.at("focal_distance").get<float>(), aperture, maxblur);
+        dof(f, dof_j.at("focal_distance").get<float>(), aperture, maxblur);
     }
-    Img srgb((size_t)w * h);
+    static Img srgb;
+    if ((size_t)w * h > srgb.size()) srgb.resize((size_t)w * h);
 #pragma omp parallel for schedule(static)
-    for (long i = 0; i < (long)img.size(); i++) srgb[i] = tonemap_srgb(img[i]);
+    for (long i = 0; i < (long)f.color.size(); i++) srgb[i] = tonemap_srgb(f.color[i]);
+    const Img* packed_src = &srgb;
     if (meta.value("fx", json::object()).value("enabled", false)) {
         auto& fx = meta.at("fx");
-        srgb = grade(srgb, w, h, fx.value("chromatic", 0.0f), fx.value("vignette", 0.0f),
-                     fx.value("saturation", 1.0f), flash);
+        static Img graded;
+        grade_into(srgb, w, h, fx.value("chromatic", 0.0f), fx.value("vignette", 0.0f),
+                   fx.value("saturation", 1.0f), flash, graded);
+        packed_src = &graded;
     }
-    vector<uint8_t> bytes((size_t)w * h * 3);
-    for (size_t i = 0; i < srgb.size(); i++)
+    bytes.resize((size_t)w * h * 3);
+    const Img& src = *packed_src;
+    for (size_t i = 0; i < src.size(); i++)
         for (int k = 0; k < 3; k++)
-            bytes[i * 3 + k] = (uint8_t)(clamp(srgb[i][k], 0.0f, 1.0f) * 255 + 0.5f);
-    return bytes;
+            bytes[i * 3 + k] = (uint8_t)(clamp(src[i][k], 0.0f, 1.0f) * 255 + 0.5f);
 }
 
 static float mat_outline_width(const json& spec) {
@@ -2091,7 +2090,8 @@ int main(int argc, char** argv) {
             float hit = hit_envelope(world.cues, still, fx.value("hit_duration", 0.35f));
             flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
         }
-        vector<uint8_t> rgb = finish(fr, meta, flash);
+        static vector<uint8_t> rgb;
+        finish(fr, meta, flash, rgb);
         if (!stbi_write_png(png.c_str(), w, h, 3, rgb.data(), w * 3)) {
             fprintf(stderr, "[cpp] ERROR: cannot write %s\n", png.c_str());
             return 1;
@@ -2130,7 +2130,8 @@ int main(int argc, char** argv) {
             float hit = hit_envelope(world.cues, t, fx.value("hit_duration", 0.35f));
             flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
         }
-        vector<uint8_t> rgb = finish(fr, meta, flash);
+        static vector<uint8_t> rgb;
+        finish(fr, meta, flash, rgb);
         prof_render += chrono::duration<double>(tf - tr).count();
         prof_finish += chrono::duration<double>(chrono::steady_clock::now() - tf).count();
         fwrite(rgb.data(), 1, rgb.size(), pipe);

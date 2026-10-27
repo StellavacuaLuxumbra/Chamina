@@ -62,16 +62,18 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 
 | 阶段 | 优化前 | 现在 | 已做 |
 |---|---|---|---|
-| render | 138ms | **99ms** | skydome 星云半分辨率+LUT（powf/expf→1D LUT）|
-| finish | 168ms | **140ms** | sRGB 编码 LUT、bloom 级联上采样（5 次全幅→1 次）|
-| 帧分配 | — | 已省 | Frame 复用（render_frame_into）、color 跳清屏（⚠️未验证）|
+| render | 138ms | **88ms** | skydome 星云半分辨率+LUT（powf/expf→1D LUT）|
+| finish | 168ms | **68.9ms** | sRGB 编码 LUT、bloom 级联上采样（5 次全幅→1 次）、|
+|      |  |  | blur 缓冲复用+跳死代码水平 pass、全链静态缓冲/原地化 |
+| 帧分配 | — | 已省 | Frame 复用（render_frame_into）、color 跳清屏（已验证）|
+| 视频段 | 3.25 fps | **5.19 fps** | 30 帧段实测（--from 570）|
 
 **待做优化（按性价比排序）**：
-1. `finish()` 里 bloom 的 5 级 `blur()` 每帧分配 tmp+out（~15MB）→ 静态
-   线程局部缓冲复用；`dof()` 同理。
+1. ~~bloom 5 级 blur 的每帧 tmp+out 分配~~（已完成：blur_into 静态缓冲 +
+   dof/grade/srgb/bytes 静态化；顺带发现水平 pass 是死代码——见 §4 条目 8）
 2. `grade()`/`dof()` 的 half-res 打包循环可以合并进 blur pass（省一次
-   全幅读写）。
-3. tonemap 的 ACES `fit()` 每像素 3 次——可换 256 级 1D LUT（输入域
+   全幅读写）——收益变小（现在只有垂直 pass），靠后。
+3. tonemap 的 ACES `fit()` 每像素 3 次——可换 1D LUT（输入域
    clamp 后单调）。
 4. 文字光栅：可见字通常 <40 个，但每帧对全部 38 块做 `eval_all`——
    按 `fade.start_at ± 5s` 预剔除（纯 CPU 节流，不影响画面）。
@@ -89,6 +91,7 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 | 5 | ffmpeg 死了照样打 done | pclose 返回值被忽略、无 ferror 检查 | 渲染循环尾部（已加，返回 1）|
 | 6 | 老场景（gift/lyrics/effects）崩 | 硬访问 fx/bloom/dof/backgrounds/start_at | main 的 meta 归一化 + cues 收集容错 |
 | 7 | MinGW popen | `_popen` 不可用 | 用 POSIX `popen/pclose` |
+| 8 | （语义发现，非 bug）| blur 的水平 pass 写 tmp 后从不被读——两方参考实现（src/native/post.rs 与本文件）都只做垂直单轴模糊，金标准即此语义渲染。**保持一致，勿修**；修了反而偏离金标准。浏览器版（UnrealBloomPass）本就是另一实现，区域比值 0.97-1.03 已覆盖差异 | blur_into 跳过水平 pass（省一半模糊计算，像素不变）|
 
 **对照语义的权威来源**：`js/anim.mjs`（相机/背景/命中包络）、
 `src/animation.rs`（字符动画）、`js/scene.js`（可视化/后处理公式）、
