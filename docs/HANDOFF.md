@@ -62,23 +62,23 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 
 | 阶段 | 优化前 | 现在 | 已做 |
 |---|---|---|---|
-| render | 138ms | **88ms** | skydome 星云半分辨率+LUT（powf/expf→1D LUT）|
-| finish | 168ms | **68.9ms** | sRGB 编码 LUT、bloom 级联上采样（5 次全幅→1 次）、|
-|      |  |  | blur 缓冲复用+跳死代码水平 pass、全链静态缓冲/原地化 |
-| 帧分配 | — | 已省 | Frame 复用（render_frame_into）、color 跳清屏（已验证）|
-| 视频段 | 3.25 fps | **5.19 fps** | 30 帧段实测（--from 570）|
+| render | 138ms | **64.3ms** | skydome 半分辨率+LUT；格点 hash/星点胞/闪烁查表 |
+| 　skydome | 132ms | **52.8ms** | base 11.9 / 星云 19.5 / 星点 19.8（桩阶梯分解）|
+| finish | 168ms | **68.9ms** | sRGB LUT、bloom 级联上采样、blur 缓冲复用+跳死代码水平 pass、ACES fit LUT、全链静态缓冲/原地化 |
+| 帧分配 | — | 已省 | Frame 复用、color 跳清屏（已验证）、文字块窗口预剔除 |
+| 视频段 | 3.25 fps | **5.92 fps** | 60 帧段实测（--from 570）|
 
 **待做优化（按性价比排序）**：
 1. ~~bloom 5 级 blur 的每帧 tmp+out 分配~~（已完成：blur_into 静态缓冲 +
    dof/grade/srgb/bytes 静态化；顺带发现水平 pass 是死代码——见 §4 条目 8）
-2. `grade()`/`dof()` 的 half-res 打包循环可以合并进 blur pass（省一次
-   全幅读写）——收益变小（现在只有垂直 pass），靠后。
-3. tonemap 的 ACES `fit()` 每像素 3 次——可换 1D LUT（输入域
-   clamp 后单调）。
-4. 文字光栅：可见字通常 <40 个，但每帧对全部 38 块做 `eval_all`——
-   按 `fade.start_at ± 5s` 预剔除（纯 CPU 节流，不影响画面）。
-5. 若还想要 2 倍：把 skydome/blur 换 SIMD（f32x4 手写或 highway），
-   或回到 wgpu 方案（docs/cpp-migration.md §二 有接口设计）。
+2. ~~tonemap ACES fit 换 LUT~~（已完成：4097 级域 [0,8]，域外精确求值）
+3. ~~文字块预剔除~~（已完成：fade 窗口 ±5s，PreparedText.vis_from/vis_to，
+   剔除整块 eval_all；无 fade 块永不剔除——零像素变化，t=12/100 A/B 验证）
+4. `grade()`/`dof()` 的 half-res 打包循环合并——收益变小（现在只有垂直
+   pass），靠后。
+5. 剩余大头：skydome base 11.9 + fbm 9.7 + 星点路径（atan2f 3ms + dd/sqrt
+   ~6ms）；finish 里 grade/tonemap/pack 三趟全幅。再往下是 SIMD/wgpu（§二
+   接口设计）。
 
 ## 4. 已修 bug 清单（防回归，改相关代码前先读）
 
@@ -141,9 +141,9 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
 
 ## 7. 建议的工作队列（接手后按序）
 
-1. **验证 §0 的 resize 修复**（未做，见最上）。
-2. 把 §3 的「待做优化」逐项做掉：每项做完必须跑 §2 回归（比值不变才算
-   过，画面差异>0.05 回滚）。
+1. ~~验证 §0 的 resize 修复~~（已完成，2026-10-28，见 §0）。
+2. ~~§3 的「待做优化」1/3/4~~（已完成：blur 静态缓冲+死代码跳过、ACES fit
+   LUT、文字块预剔除；回归全部像素级零漂移，见 §3 表）。剩余项见 §3 待做。
 3. 功能缺口（对照 JS 版逐一移植）：
    - `lrc2scene` 的场景生成链（LRC 解析/词组/甩镜布局/调色板）→ 做成
      `chamina-cpp gen` 子命令，彻底甩掉 Node；

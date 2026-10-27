@@ -215,5 +215,11 @@ text 1.030 / full 1.020，t=20.35 full 1.026，t=325 full 0.989。
 
 **速度**：3.25-3.61 fps（视频段实测），对比优化前 2.7-2.9 fps。
 
-**待做**（按性价比）：bloom/blur 的 tmp+out 缓冲静态复用（~15MB/帧）、
-half-res 打包合并进 blur pass、ACES fit 1D LUT、文字块预剔除。
+**待做**（按性价比）：grade/dof half-res 打包合并进 blur pass（收益变小）、
+SIMD/wgpu 大项。已完成的：blur 静态缓冲复用+跳死代码水平 pass、dof/grade/
+srgb/bytes 全链静态化与原地化（finish 68.9ms）、ACES fit 1D LUT（4097 级
+域 [0,8]，域外精确求值）、文字块 fade 窗口 ±5s 预剔除、skydome 三张查表
+（格点 hash 1024×512 急切表 / 星点胞 381×191 r+j0+j1 / 每帧闪烁胞缓冲
+73k sins）。skydome 分解：base 11.9 / 星云 19.5（fbm 9.7）/ 星点 19.8。
+视频段 5.92 fps（60 帧实测）。全部经 js/region-cmp.mjs 回归像素级零漂移
+（t=8/20.35/325 金标准 + t=12/100 新旧 A/B 均 1.000）。
