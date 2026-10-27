@@ -960,7 +960,7 @@ static float fbm2(float x, float y) {
     return v;
 }
 
-static void skydome_pixel(const Vec3& d, float t, const float pal[12], float col[3]) {
+[[maybe_unused]] static void skydome_pixel(const Vec3& d, float t, const float pal[12], float col[3]) {
     float h = clamp(d.y * 0.5f + 0.5f, 0.0f, 1.0f);
     float mixv = powf(h, 0.85f);
     for (int i = 0; i < 3; i++) col[i] = pal[3 + i] + (pal[i] - pal[3 + i]) * mixv;
@@ -995,19 +995,111 @@ static void skydome_pixel(const Vec3& d, float t, const float pal[12], float col
 }
 
 static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12]) {
+    const int w = f.w, h = f.h;
+
+    // 1-D LUTs for the two transcendental per-pixel terms (outputs are mixed
+    // into gradients far below 8-bit significance).
+    static const float* lut_pow085 = [] {
+        static float v[4097];
+        for (int i = 0; i <= 4096; i++) v[i] = powf((float)i / 4096, 0.85f);
+        return v;
+    }();
+    static const float* lut_exp5 = [] {
+        static float v[2049];
+        for (int i = 0; i <= 2048; i++) v[i] = expf(-(float)i / 2048 * 5.0f);
+        return v;
+    }();
+    auto lut = [](const float* lutv, int n, float x) {
+        float xx = clamp(x, 0.0f, 1.0f) * n;
+        int i = (int)xx;
+        if (i > n - 1) i = n - 1;
+        float fr = xx - i;
+        return lutv[i] + (lutv[i + 1] - lutv[i]) * fr;
+    };
+
+    // The nebula is the expensive part (8 sinf per pixel in fbm) and is pure
+    // low frequency: sample it at half resolution and bilinear upsample. The
+    // stars stay full res — they are 1-2 px points and would not survive.
+    const int hw = max(w / 2, 1), hh = max(h / 2, 1);
+    static vector<float> cloud;
+    const bool need_cloud = pal[9] > 0.001f;
+    if (need_cloud) {
+        cloud.assign((size_t)hw * hh, 0.0f);
 #pragma omp parallel for schedule(static)
-    for (int row = 0; row < f.h; row++) {
+        for (int row = 0; row < hh; row++) {
+            float py = (row + 0.5f) * h / hh;
+            float yn = 1 - 2 * py / h;
+            for (int x = 0; x < hw; x++) {
+                float px = (x + 0.5f) * w / hw;
+                float xn = 2 * px / w - 1;
+                Vec3 ray = (cam.fwd + cam.right * (xn * cam.tan_h * cam.aspect) +
+                            cam.up * (yn * cam.tan_h))
+                               .normalize();
+                float uv0 = atan2f(ray.z, ray.x) / (float)M_PI / 2 + 0.5f;
+                float uv1 = ray.y * 0.5f + 0.5f;
+                float qx = (uv0 * 7 + t * pal[11] * 0.018f) * 2;
+                float qy = (uv1 * 3.5f + t * pal[11] * 0.009f) * 2;
+                float n = fbm2(qx, qy);
+                float kk = clamp((n - 0.40f) / (0.92f - 0.40f), 0.0f, 1.0f);
+                cloud[(size_t)row * hw + x] = kk * kk * (3 - 2 * kk);
+            }
+        }
+    }
+
+    const bool need_stars = pal[10] > 0.001f;
+#pragma omp parallel for schedule(static)
+    for (int row = 0; row < h; row++) {
         float py = row + 0.5f;
-        float yn = 1 - 2 * py / f.h;
-        for (int col_i = 0; col_i < f.w; col_i++) {
-            float xn = 2 * (col_i + 0.5f) / f.w - 1;
-            Vec3 ray = (cam.fwd + cam.right * (xn * cam.tan_h * cam.aspect) +
-                        cam.up * (yn * cam.tan_h))
-                           .normalize();
+        float yn = 1 - 2 * py / h;
+        for (int col_i = 0; col_i < w; col_i++) {
+            float xn = 2 * (col_i + 0.5f) / w - 1;
+            Vec3 d = (cam.fwd + cam.right * (xn * cam.tan_h * cam.aspect) +
+                      cam.up * (yn * cam.tan_h))
+                         .normalize();
+            // gradient (powf → LUT)
+            float h01 = clamp(d.y * 0.5f + 0.5f, 0.0f, 1.0f);
+            float mixv = lut(lut_pow085, 4096, h01);
             float col[3];
-            skydome_pixel(ray, t, pal, col);
-            f.color[(size_t)row * f.w + col_i] = {col[0], col[1], col[2]};
-            f.depth[(size_t)row * f.w + col_i] = 300.0f;
+            for (int i = 0; i < 3; i++)
+                col[i] = pal[3 + i] + (pal[i] - pal[3 + i]) * mixv;
+            // nebula cloud (half-res field) + horizon band (expf → LUT)
+            if (need_cloud) {
+                float cx = (col_i + 0.5f) * hw / w - 0.5f;
+                float cy = (row + 0.5f) * hh / h - 0.5f;
+                int x0 = (int)floorf(max(cx, 0.0f));
+                int y0 = (int)floorf(max(cy, 0.0f));
+                int x1 = min(x0 + 1, hw - 1), y1 = min(y0 + 1, hh - 1);
+                float tx = clamp(cx - x0, 0.0f, 1.0f), ty = clamp(cy - y0, 0.0f, 1.0f);
+                float cval = (cloud[(size_t)y0 * hw + x0] * (1 - tx) +
+                              cloud[(size_t)y0 * hw + x1] * tx) * (1 - ty) +
+                             (cloud[(size_t)y1 * hw + x0] * (1 - tx) +
+                              cloud[(size_t)y1 * hw + x1] * tx) * ty;
+                float band = lut(lut_exp5, 2048, fabsf(d.y));
+                for (int i = 0; i < 3; i++)
+                    col[i] += pal[6 + i] * (cval * pal[9] * 0.95f + band * pal[9] * 0.30f);
+            }
+            if (need_stars) {
+                float uv0 = atan2f(d.z, d.x) / (float)M_PI / 2 + 0.5f;
+                float uv1 = d.y * 0.5f + 0.5f;
+                float sp0 = uv0 * 380, sp1 = uv1 * 190;
+                float c0 = floorf(sp0), c1 = floorf(sp1);
+                float r = hash2(c0, c1);
+                float f0 = sp0 - c0 - 0.5f, f1 = sp1 - c1 - 0.5f;
+                float j0 = hash2(c0 + 7.1f, c1 + 7.1f) - 0.5f;
+                float j1 = hash2(c0 + 13.7f, c1 + 13.7f) - 0.5f;
+                float dd = sqrtf((f0 - j0 * 0.6f) * (f0 - j0 * 0.6f) +
+                                 (f1 - j1 * 0.6f) * (f1 - j1 * 0.6f));
+                float kk = clamp((dd - 0.16f) / -0.16f, 0.0f, 1.0f);
+                float star = kk * kk * (3 - 2 * kk);
+                float tw = 0.55f + 0.45f * sinf(t * 1.7f + r * 40);
+                float on = r <= 0.055f ? 1.0f : 0.0f;
+                float add[3] = {0.78f, 0.86f, 1.0f};
+                for (int i = 0; i < 3; i++) col[i] += add[i] * star * on * tw * pal[10] * 1.7f;
+            }
+            float rad = clamp(sqrtf(d.x * d.x + d.y * d.y) * 1.15f, 0.0f, 1.0f);
+            float sink = 1 - 0.30f * rad * rad;
+            f.color[(size_t)row * w + col_i] = {col[0] * sink, col[1] * sink, col[2] * sink};
+            f.depth[(size_t)row * w + col_i] = 300.0f;
         }
     }
 }
@@ -1092,9 +1184,15 @@ struct World {
         }
         float dur = duration();
         for (const auto& tx : scene.at("texts"))
-            for (const auto& a : tx.at("animations"))
-                if (a.value("type", "") == "fade")
-                    cues.push_back(a.at("start_at").get<float>());
+            for (const auto& a : tx.at("animations")) {
+                // Older scenes may omit start_at on a fade; a missing cue is
+                // simply not tracked rather than fatal.
+                if (a.value("type", "") == "fade") {
+                    auto it = a.find("start_at");
+                    if (it != a.end() && it->is_number())
+                        cues.push_back(it->get<float>());
+                }
+            }
         sort(cues.begin(), cues.end());
         float outro_start = INFINITY;
         for (const auto& tx : scene.at("texts")) {
@@ -1168,7 +1266,9 @@ struct World {
         return w > 0.001f ? cam_roll * w : 0;
     }
 
-    Frame render_frame(float t) const {
+    // Renders into a caller-owned buffer so the two 30 MB vectors keep their
+    // capacity across frames instead of being re-allocated per frame.
+    void render_frame_into(float t, Frame& f) const {
         int w = meta.at("width").get<int>(), h = meta.at("height").get<int>();
         float fov = meta.at("camera").at("fov").get<float>();
         float aspect = (float)w / h;
@@ -1191,14 +1291,19 @@ struct World {
             fprintf(stderr, "[dbg] cam eye=(%.3f,%.3f,%.3f) tgt=(%.3f,%.3f,%.3f) roll=%.3f\n",
                     cam.eye.x, cam.eye.y, cam.eye.z, cam.target.x, cam.target.y,
                     cam.target.z, cam.roll);
-        Frame f;
         f.w = w;
         f.h = h;
-        f.color.assign((size_t)w * h, {0, 0, 0});
-        f.depth.assign((size_t)w * h, INFINITY);
-
+        // The dome overwrites every colour pixel when a background is active,
+        // so the colour clear is only needed on a flat-background scene.
+        // resize (not assign): once sized, later frames write nothing here.
         float pal[12];
-        if (eval_backgrounds(meta.value("backgrounds", json::array()), t, pal)) {
+        const bool has_bg = eval_backgrounds(meta.value("backgrounds", json::array()), t, pal);
+        if (has_bg)
+            f.color.resize((size_t)w * h);
+        else
+            f.color.assign((size_t)w * h, {0, 0, 0});
+        f.depth.assign((size_t)w * h, INFINITY);
+        if (has_bg) {
             // sRGB → linear for the shader-space math
             float lin[12];
             auto to_lin = [](float c) {
@@ -1208,7 +1313,13 @@ struct World {
             lin[9] = pal[9];
             lin[10] = pal[10];
             lin[11] = pal[11];
+            double _t_sky = 0;
+            if (getenv("CPP_PROF")) _t_sky = chrono::duration<double>(chrono::steady_clock::now().time_since_epoch()).count();
             draw_skydome(f, cam, t, lin);
+            if (getenv("CPP_PROF")) {
+                _t_sky = chrono::duration<double>(chrono::steady_clock::now().time_since_epoch()).count() - _t_sky;
+                fprintf(stderr, "[prof] skydome %.1fms\n", _t_sky * 1000);
+            }
         }
 
         // text, far to near
@@ -1428,6 +1539,11 @@ struct World {
                     }
             }
         }
+    }
+
+    Frame render_frame(float t) const {
+        Frame f;
+        render_frame_into(t, f);
         return f;
     }
 };
@@ -1519,36 +1635,60 @@ static Img bloom(const Frame& f, float intensity, float threshold) {
         chh = nh;
     }
     float weights[5] = {1.0f, 0.8f, 0.6f, 0.4f, 0.2f};
-    Img acc((size_t)w * h, {0, 0, 0});
-    for (size_t li = 0; li < levels.size(); li++) {
-        auto [lw, lh] = sizes[li];
-        float wt = weights[min(li, (size_t)4)];
-        float k = intensity * bloom_gain_global;
+    float k = intensity * bloom_gain_global;
+    // Cascade: fold the small mips into their parents (bilinear + add) and
+    // touch full resolution exactly once, instead of upsampling all five
+    // levels to full res. Same soft result, a fifth of the traffic.
+    auto upsample_into = [](Img& dst, int dw, int dh, const Img& src, int sw, int sh,
+                            float mul, const Img* add) {
+        dst.assign((size_t)dw * dh, {0, 0, 0});
 #pragma omp parallel for schedule(static)
-        for (int y = 0; y < h; y++) {
-            float fy = ((float)y + 0.5f) * lh / h - 0.5f;
+        for (int y = 0; y < dh; y++) {
+            float fy = ((float)y + 0.5f) * sh / dh - 0.5f;
             int y0 = (int)floorf(max(fy, 0.0f));
-            int y1 = min(y0 + 1, lh - 1);
+            int y1 = min(y0 + 1, sh - 1);
             float ty = clamp(fy - y0, 0.0f, 1.0f);
-            for (int x = 0; x < w; x++) {
-                float fx = ((float)x + 0.5f) * lw / w - 0.5f;
+            for (int x = 0; x < dw; x++) {
+                float fx = ((float)x + 0.5f) * sw / dw - 0.5f;
                 int x0 = (int)floorf(max(fx, 0.0f));
-                int x1 = min(x0 + 1, lw - 1);
+                int x1 = min(x0 + 1, sw - 1);
                 float tx = clamp(fx - x0, 0.0f, 1.0f);
-                auto& a = levels[li][(size_t)y0 * lw + x0];
-                auto& b = levels[li][(size_t)y0 * lw + x1];
-                auto& c = levels[li][(size_t)y1 * lw + x0];
-                auto& d = levels[li][(size_t)y1 * lw + x1];
-                auto& o = acc[(size_t)y * w + x];
+                auto& a = src[(size_t)y0 * sw + x0];
+                auto& b = src[(size_t)y0 * sw + x1];
+                auto& c = src[(size_t)y1 * sw + x0];
+                auto& d = src[(size_t)y1 * sw + x1];
+                auto& o = dst[(size_t)y * dw + x];
                 for (int kk = 0; kk < 3; kk++) {
                     float top = a[kk] + (b[kk] - a[kk]) * tx;
                     float bot = c[kk] + (d[kk] - c[kk]) * tx;
-                    o[kk] += (top + (bot - top) * ty) * wt * k;
+                    o[kk] = (top + (bot - top) * ty) * mul;
+                    if (add) o[kk] += (*add)[(size_t)y * dw + x][kk];
                 }
             }
         }
+    };
+    size_t n = levels.size();
+    Img acc;
+    {
+        auto [sw, sh] = sizes[n - 1];
+        upsample_into(acc, sw, sh, levels[n - 1], sw, sh,
+                      weights[min(n - 1, (size_t)4)] * k, nullptr);
     }
-    return acc;
+    for (int li = (int)n - 2; li >= 0; li--) {
+        auto [dw, dh] = sizes[li];
+        auto [sw, sh] = sizes[li + 1];
+        Img up;
+        upsample_into(up, dw, dh, acc, sw, sh, 1.0f, nullptr);
+        // add this level's own (weighted) energy
+#pragma omp parallel for schedule(static)
+        for (long i = 0; i < (long)up.size(); i++)
+            for (int kk = 0; kk < 3; kk++)
+                up[i][kk] += levels[li][i][kk] * weights[min((size_t)li, (size_t)4)] * k;
+        acc = move(up);
+    }
+    Img out;
+    upsample_into(out, w, h, acc, sizes[0].first, sizes[0].second, 1.0f, nullptr);
+    return out;
 }
 
 static Img dof(const Img& color, const Frame& f, float focus, float aperture,
@@ -1610,6 +1750,28 @@ static Img dof(const Img& color, const Frame& f, float focus, float aperture,
     return out;
 }
 
+// sRGB encode LUT: 4097 entries cover [0,1] finer than the 8-bit output, so
+// the LUT is visually exact while replacing two million powf calls a frame.
+static const float* srgb_lut() {
+    static vector<float> lut = [] {
+        vector<float> v(4097);
+        for (int i = 0; i <= 4096; i++) {
+            float x = (float)i / 4096;
+            v[i] = x <= 0.0031308f ? x * 12.92f : 1.055f * powf(x, 1 / 2.4f) - 0.055f;
+        }
+        return v;
+    }();
+    return lut.data();
+}
+static inline float srgb_encode_lut(float v) {
+    const float* lut = srgb_lut();
+    float x = clamp(v, 0.0f, 1.0f) * 4096.0f;
+    int i = (int)x;
+    if (i > 4095) i = 4095;
+    float f = x - i;
+    return lut[i] + (lut[i + 1] - lut[i]) * f;
+}
+
 static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     const float M[3][3] = {{0.59719f, 0.07600f, 0.02840f},
                            {0.35458f, 0.90834f, 0.13383f},
@@ -1629,7 +1791,7 @@ static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     for (int i = 0; i < 3; i++) {
         float v = clamp(fitted[0] * MO[i][0] + fitted[1] * MO[i][1] + fitted[2] * MO[i][2],
                         0.0f, 1.0f);
-        out[i] = v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1 / 2.4f) - 0.055f;
+        out[i] = srgb_encode_lut(v);
     }
     return out;
 }
@@ -1751,6 +1913,14 @@ int main(int argc, char** argv) {
     if (!meta.contains("total_frames"))
         meta["total_frames"] =
             (unsigned)ceil(meta.at("duration").get<float>() * meta.at("fps").get<float>());
+    // Older / minimal scenes may omit whole sections; normalise once so every
+    // downstream .at() is safe.
+    if (!meta.contains("fx")) meta["fx"] = json{{"enabled", false}};
+    if (!meta.contains("bloom")) meta["bloom"] = json{{"enabled", false}};
+    if (!meta.contains("dof")) meta["dof"] = json{{"enabled", false}};
+    if (!meta.contains("backgrounds")) meta["backgrounds"] = json::array();
+    if (!meta.contains("camera"))
+        meta["camera"] = json{{"fov", 0.8726646f}, {"near", 0.01f}, {"far", 500.0f}};
     World world(scene, meta);
     TRACE = getenv("CPP_TRACE") != nullptr;
     if (!audio_env_path.empty()) {
@@ -1883,8 +2053,10 @@ int main(int argc, char** argv) {
         for (size_t bi = 0; bi < world.texts.size(); bi++) {
             auto& tx = world.texts[bi];
             float cue = INFINITY;
-            for (const auto& a : tx.anims->items())
-                if (a.value()["type"] == "fade") cue = a.value()["start_at"].get<float>();
+            for (const auto& a : tx.anims->items()) {
+                const json& aj = a.value();
+                if (aj.value("type", "") == "fade") cue = aj.value("start_at", 0.0f);
+            }
             if (!isfinite(cue)) continue;
             r = (uint32_t)(bi * 131 + 7);
             for (int k = 0; k < 14; k++) {
@@ -1909,7 +2081,8 @@ int main(int argc, char** argv) {
     count = min(count, total - from);
 
     if (still >= 0) {
-        Frame fr = world.render_frame(still);
+        Frame fr;
+        world.render_frame_into(still, fr);
         auto& fx = meta.at("fx");
         float flash = 0;
         if (fx.value("enabled", false)) {
@@ -1919,25 +2092,36 @@ int main(int argc, char** argv) {
             flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
         }
         vector<uint8_t> rgb = finish(fr, meta, flash);
-        stbi_write_png(png.c_str(), w, h, 3, rgb.data(), w * 3);
+        if (!stbi_write_png(png.c_str(), w, h, 3, rgb.data(), w * 3)) {
+            fprintf(stderr, "[cpp] ERROR: cannot write %s\n", png.c_str());
+            return 1;
+        }
         printf("still t=%g -> %s\n", still, png.c_str());
         return 0;
     }
 
-    string cmd = "\"" + find_ffmpeg() + "\" -y -hide_banner -loglevel error -f rawvideo "
+    // popen shells out through `cmd /c`, which eats the leading quote when a
+    // line holds several — wrapping the whole command in one extra quote pair
+    // keeps every inner quote intact (verified against cmd's parsing rules).
+    string cmd = "\"\"" + find_ffmpeg() + "\" -y -hide_banner -loglevel error -f rawvideo "
                  "-pix_fmt rgb24 -s " + to_string(w) + "x" + to_string(h) +
                  " -framerate " + to_string(fps) + " -i pipe:0 -c:v libx264 -preset medium "
                  "-crf 18 -pix_fmt yuv420p -vf scale=trunc(iw/2)*2:trunc(ih/2)*2 "
-                 "-movflags +faststart \"" + out + "\"";
+                 "-movflags +faststart \"" + out + "\"\"";
     FILE* pipe = popen(cmd.c_str(), "wb");
     if (!pipe) {
         fprintf(stderr, "cannot start ffmpeg\n");
         return 1;
     }
     auto t0 = chrono::steady_clock::now();
+    double prof_render = 0, prof_finish = 0;
+    bool prof = getenv("CPP_PROF") != nullptr;
     for (unsigned i = 0; i < count; i++) {
         float t = (from + i) / (float)fps;
-        Frame fr = world.render_frame(t);
+        auto tr = chrono::steady_clock::now();
+        static Frame fr;
+        world.render_frame_into(t, fr);
+        auto tf = chrono::steady_clock::now();
         auto& fx = meta.at("fx");
         float flash = 0;
         if (fx.value("enabled", false)) {
@@ -1947,16 +2131,32 @@ int main(int argc, char** argv) {
             flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
         }
         vector<uint8_t> rgb = finish(fr, meta, flash);
+        prof_render += chrono::duration<double>(tf - tr).count();
+        prof_finish += chrono::duration<double>(chrono::steady_clock::now() - tf).count();
         fwrite(rgb.data(), 1, rgb.size(), pipe);
+        // A dead ffmpeg turns the pipe into a silent sink — surface it instead
+        // of "done"-ing over a missing file.
+        if (ferror(pipe)) {
+            fprintf(stderr, "[cpp] ERROR: ffmpeg pipe broke at frame %u\n", i + 1);
+            pclose(pipe);
+            return 1;
+        }
         if ((i + 1) % 60 == 0 || i + 1 == count) {
             double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
             fprintf(stderr, "[cpp] frame %u/%u  %.2f fps  elapsed %.1fs  eta %.0fs\n",
                     i + 1, count, (i + 1) / el, el, el / (i + 1) * (count - i - 1));
         }
     }
-    pclose(pipe);
+    int rc = pclose(pipe);
     double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+    if (rc != 0) {
+        fprintf(stderr, "[cpp] ERROR: ffmpeg exited %d — output may be missing or bad\n", rc);
+        return 1;
+    }
     fprintf(stderr, "[cpp] done -> %s  %u frames  %.2f fps\n", out.c_str(), count,
             count / el);
+    if (prof)
+        fprintf(stderr, "[prof] render %.1fms/f  finish %.1fms/f\n",
+                prof_render / count * 1000, prof_finish / count * 1000);
     return 0;
 }

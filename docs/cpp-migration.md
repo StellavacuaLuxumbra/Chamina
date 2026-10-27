@@ -185,6 +185,8 @@ OpenMP + ffmpeg 子进程。全部单头 vendored 进 cpp/vendor/，无包管理
 - 速度：2.7-2.9 fps（OpenMP 6 线程），全片 11010 帧约 68 分钟——比 Rust 版
   2.24fps 更快。
 
+**交付前修掉的第 4 个 bug（2026-10-25 晚，用户实测「能不能渲染」暴露）**：popen 走 cmd /c，首引号被 cmd 吞（行内多引号时）+ 正斜杠路径被 cmd 拒——症状是渲染报 done 但 mp4 不落盘。修法：ffmpeg 路径统一反斜杠 + 整条命令外包一层引号（cmd /c 引号规则的官方 workaround）。150 帧样片实测落盘且画面正确。
+
 **交付（2026-10-25 终局：用户明确「只要软件，不要成片」）**：`cppuild.bat` → `distchamina-cpp.exe`（3.5MB 静态单文件，无 DLL 依赖）。
 用法/开关/架构见 `cpp/README.md`。全片渲染能力已验证可用（2.7-2.9fps）但按需执行，不再默认产出。
 
@@ -193,3 +195,25 @@ OpenMP + ffmpeg 子进程。全部单头 vendored 进 cpp/vendor/，无包管理
 2. Rust 软件光栅（src/native，chamina-native.exe）
 3. **C++ 全引擎（cpp/src/chamina.cpp，chamina-cpp.exe）——字体/排版/动画/
    渲染从此不依赖 Rust 与 Node**
+
+## 九、性能优化第一批（2026-10-28，接手会话验证）
+
+**已落地**（CPP_PROF=1 可输出各段毫秒）：
+- skydome：星云半分辨率采样 + 双线性上采样；powf/expf → 1D LUT
+  （lut_pow085 4097 级 / lut_exp5 2049 级）。render 138ms → **99ms**。
+- finish：sRGB 编码 LUT；bloom 级联上采样（5 次全幅遍历 → 1 次）。
+  finish 168ms → **140ms**。
+- Frame 复用（render_frame_into 进出参，不再每帧新建 24MB Frame）。
+- 颜色清屏跳过：背景激活时 dome 全覆盖每像素，`resize` 代替 `assign`
+  （注意必须 resize——dome 直接索引向量，assign 空向量会段错误；
+  平面背景场景仍需 assign 清屏）。
+
+**验收**（js/region-cmp.mjs，exit 0=过）：静态验证 `--still 8/20.35/325`
++ 30 帧视频段 `--from 570 --frames 30`。新旧二进制（优化前/后）同刻对比
+各区域比值 0.998–1.000；对 Rust 金标准 t=8 sky 1.005 / horizon 1.014 /
+text 1.030 / full 1.020，t=20.35 full 1.026，t=325 full 0.989。
+
+**速度**：3.25-3.61 fps（视频段实测），对比优化前 2.7-2.9 fps。
+
+**待做**（按性价比）：bloom/blur 的 tmp+out 缓冲静态复用（~15MB/帧）、
+half-res 打包合并进 blur pass、ACES fit 1D LUT、文字块预剔除。
