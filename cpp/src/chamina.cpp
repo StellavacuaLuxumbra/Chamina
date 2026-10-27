@@ -786,6 +786,10 @@ struct PreparedText {
     float outline_strength;
     const json* anims;
     const json* char_times;
+    // Block-level visibility window from its fade anims (the only alpha
+    // source). Outside [vis_from, vis_to] every char's alpha is 0 — skip the
+    // whole block's eval_all. Defaults keep never-fading blocks always on.
+    float vis_from = -INFINITY, vis_to = INFINITY;
     float total_width_em = 0;
     float hw = 1;
 };
@@ -941,12 +945,33 @@ static float hash2(float x, float y) {
     float s = sinf(x * 127.1f + y * 311.7f) * 43758.5453123f;
     return s - floorf(s);
 }
-static float vnoise(float x, float y) {
+
+// vnoise evaluates hash2 only at integer lattice corners, revisiting the same
+// points every frame. A precomputed table replaces ~16M large-arg sinf calls
+// per frame with lookups. Bit-exact: identical formula, cached results. The
+// table covers lattice points [0,1024) x [0,512) — enough for t ≤ ~6 min at
+// palette speed ≤ 9 — anything else (negative / out of range) falls back to
+// the exact hash2.
+static const float* lattice_hash_tab() {
+    static vector<float> tab = [] {
+        vector<float> t((size_t)1024 * 512);
+        for (int y = 0; y < 512; y++)
+            for (int x = 0; x < 1024; x++)
+                t[(size_t)y * 1024 + x] = hash2((float)x, (float)y);
+        return t;
+    }();
+    return tab.data();
+}
+static float hash2_lattice(float x, float y) {
+    if (x >= 0 && y >= 0 && x < 1024 && y < 512 && x == floorf(x) && y == floorf(y))
+        return lattice_hash_tab()[(size_t)(int)y * 1024 + (int)x];
+    return hash2(x, y);
+}static float vnoise(float x, float y) {
     float ix = floorf(x), iy = floorf(y);
     float fx = x - ix, fy = y - iy;
     float ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-    float a = hash2(ix, iy) * (1 - ux) + hash2(ix + 1, iy) * ux;
-    float b = hash2(ix, iy + 1) * (1 - ux) + hash2(ix + 1, iy + 1) * ux;
+    float a = hash2_lattice(ix, iy) * (1 - ux) + hash2_lattice(ix + 1, iy) * ux;
+    float b = hash2_lattice(ix, iy + 1) * (1 - ux) + hash2_lattice(ix + 1, iy + 1) * ux;
     return a * (1 - uy) + b * uy;
 }
 static float fbm2(float x, float y) {
@@ -959,6 +984,29 @@ static float fbm2(float x, float y) {
     }
     return v;
 }
+
+// Per-cell star hash values depend only on the cell index, but the reference
+// recomputes three hash2 calls per full-res pixel per frame (~6M large-arg
+// sinf). Hoisted into a table, bit-exact (same expressions). 381x191 covers
+// c0 = floor(uv0*380) ≤ 380 and c1 = floor(uv1*190) ≤ 190 exactly.
+struct StarTable {
+    static constexpr int CW = 381, CH = 191;
+    float r[CW * CH], j0[CW * CH], j1[CW * CH];
+    static const StarTable& get() {
+        static const StarTable t = [] {
+            StarTable s;
+            for (int y = 0; y < CH; y++)
+                for (int x = 0; x < CW; x++) {
+                    size_t i = (size_t)y * CW + x;
+                    s.r[i] = hash2((float)x, (float)y);
+                    s.j0[i] = hash2((float)x + 7.1f, (float)y + 7.1f) - 0.5f;
+                    s.j1[i] = hash2((float)x + 13.7f, (float)y + 13.7f) - 0.5f;
+                }
+            return s;
+        }();
+        return t;
+    }
+};
 
 [[maybe_unused]] static void skydome_pixel(const Vec3& d, float t, const float pal[12], float col[3]) {
     float h = clamp(d.y * 0.5f + 0.5f, 0.0f, 1.0f);
@@ -1022,7 +1070,7 @@ static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12])
     // stars stay full res — they are 1-2 px points and would not survive.
     const int hw = max(w / 2, 1), hh = max(h / 2, 1);
     static vector<float> cloud;
-    const bool need_cloud = pal[9] > 0.001f;
+    const bool need_cloud = pal[9] > 0.001f && !getenv("CPP_SKIP_CLOUD");
     if (need_cloud) {
         cloud.assign((size_t)hw * hh, 0.0f);
 #pragma omp parallel for schedule(static)
@@ -1046,7 +1094,18 @@ static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12])
         }
     }
 
-    const bool need_stars = pal[10] > 0.001f;
+    const bool need_stars = pal[10] > 0.001f && !getenv("CPP_SKIP_STARS");
+    // Per-cell twinkle is a function of (t, r) and r is per-cell — hoist the
+    // sinf out of the full-res pixel loop (2M → 73k calls/frame), bit-exact.
+    static vector<float> cell_tw;
+    if (need_stars) {
+        const StarTable& st = StarTable::get();
+        if ((size_t)StarTable::CW * StarTable::CH > cell_tw.size())
+            cell_tw.resize((size_t)StarTable::CW * StarTable::CH);
+#pragma omp parallel for schedule(static)
+        for (long i = 0; i < (long)StarTable::CW * StarTable::CH; i++)
+            cell_tw[i] = 0.55f + 0.45f * sinf(t * 1.7f + st.r[i] * 40);
+    }
 #pragma omp parallel for schedule(static)
     for (int row = 0; row < h; row++) {
         float py = row + 0.5f;
@@ -1083,15 +1142,17 @@ static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12])
                 float uv1 = d.y * 0.5f + 0.5f;
                 float sp0 = uv0 * 380, sp1 = uv1 * 190;
                 float c0 = floorf(sp0), c1 = floorf(sp1);
-                float r = hash2(c0, c1);
+                const StarTable& st = StarTable::get();
+                size_t ci = (size_t)(int)c1 * StarTable::CW + (int)c0;
+                float r = st.r[ci];
                 float f0 = sp0 - c0 - 0.5f, f1 = sp1 - c1 - 0.5f;
-                float j0 = hash2(c0 + 7.1f, c1 + 7.1f) - 0.5f;
-                float j1 = hash2(c0 + 13.7f, c1 + 13.7f) - 0.5f;
+                float j0 = st.j0[ci];
+                float j1 = st.j1[ci];
                 float dd = sqrtf((f0 - j0 * 0.6f) * (f0 - j0 * 0.6f) +
                                  (f1 - j1 * 0.6f) * (f1 - j1 * 0.6f));
                 float kk = clamp((dd - 0.16f) / -0.16f, 0.0f, 1.0f);
                 float star = kk * kk * (3 - 2 * kk);
-                float tw = 0.55f + 0.45f * sinf(t * 1.7f + r * 40);
+                float tw = cell_tw[ci];
                 float on = r <= 0.055f ? 1.0f : 0.0f;
                 float add[3] = {0.78f, 0.86f, 1.0f};
                 for (int i = 0; i < 3; i++) col[i] += add[i] * star * on * tw * pal[10] * 1.7f;
@@ -1331,6 +1392,7 @@ struct World {
         });
         for (size_t bi : order) {
             const auto& tx = texts[bi];
+            if (t < tx.vis_from || t > tx.vis_to) continue;
             if (TRACE && !tx.chars.empty()) {
                 AnimState st0 = eval_all(*tx.anims, t, tx.chars[0].idx, tx.size, tx.char_times);
                 fprintf(stderr,
@@ -1765,6 +1827,34 @@ static inline float srgb_encode_lut(float v) {
     return lut[i] + (lut[i + 1] - lut[i]) * f;
 }
 
+// ACES fit LUT: the rational fit is monotonic on [0,∞); a 4096-step table
+// over [0,8] keeps output error ~1e-4 (far below 8-bit significance) and
+// replaces ~6M rational evaluations a frame. Above 8 (rare flash/specular
+// spikes) the exact expression is kept so the tail stays correct.
+static const float* aces_lut() {
+    static vector<float> lut = [] {
+        vector<float> v(4097);
+        for (int i = 0; i <= 4096; i++) {
+            float x = (float)i / 4096 * 8.0f;
+            v[i] = (x * (x + 0.0245786f) - 0.000090537f) /
+                   (x * (0.983729f * x + 0.4329510f) + 0.238081f);
+        }
+        return v;
+    }();
+    return lut.data();
+}
+static inline float aces_fit(float v) {
+    const float* lut = aces_lut();
+    if (v <= 0.0f) return lut[0]; // matches max(v,0) of the reference fit
+    if (v >= 8.0f)
+        return (v * (v + 0.0245786f) - 0.000090537f) /
+               (v * (0.983729f * v + 0.4329510f) + 0.238081f);
+    float x = v * (4096.0f / 8.0f);
+    int i = (int)x;
+    float f = x - i;
+    return lut[i] + (lut[i + 1] - lut[i]) * f;
+}
+
 static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     const float M[3][3] = {{0.59719f, 0.07600f, 0.02840f},
                            {0.35458f, 0.90834f, 0.13383f},
@@ -1772,14 +1862,9 @@ static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     const float MO[3][3] = {{1.60475f, -0.10208f, -0.00327f},
                             {-0.53108f, 1.10813f, -0.07276f},
                             {-0.07367f, -0.00605f, 1.07602f}};
-    auto fit = [](float v) {
-        v = max(v, 0.0f);
-        return (v * (v + 0.0245786f) - 0.000090537f) /
-               (v * (0.983729f * v + 0.4329510f) + 0.238081f);
-    };
     float fitted[3];
     for (int i = 0; i < 3; i++)
-        fitted[i] = fit(c[0] * M[i][0] + c[1] * M[i][1] + c[2] * M[i][2]);
+        fitted[i] = aces_fit(c[0] * M[i][0] + c[1] * M[i][1] + c[2] * M[i][2]);
     array<float, 3> out;
     for (int i = 0; i < 3; i++) {
         float v = clamp(fitted[0] * MO[i][0] + fitted[1] * MO[i][1] + fitted[2] * MO[i][2],
@@ -1958,6 +2043,31 @@ int main(int argc, char** argv) {
         tx.alpha = spec.value("alpha", 1.0f);
         tx.anims = &spec.at("animations");
         tx.char_times = spec.contains("char_times") ? &spec.at("char_times") : nullptr;
+        {
+            // Fade anims define the block's visible span: first char becomes
+            // visible at ~min(start_at), all fade out by max(fade_out_at +
+            // fade_out). A ±5s margin absorbs char_times/stagger edges. If any
+            // fade lacks fade_out_at the block stays visible indefinitely, so
+            // the upper bound is left open. Conservative: worst case we
+            // evaluate a block whose chars are all transparent — never the
+            // reverse.
+            bool has_fade = false, all_bounded = true;
+            float lo = INFINITY, hi = -INFINITY;
+            for (const auto& a : spec.at("animations")) {
+                if (a.value("type", "") != "fade") continue;
+                has_fade = true;
+                lo = min(lo, a.value("start_at", 0.0f));
+                auto fo_it = a.find("fade_out_at");
+                if (fo_it != a.end() && fo_it->is_number())
+                    hi = max(hi, fo_it->get<float>() + a.value("fade_out", 0.45f));
+                else
+                    all_bounded = false;
+            }
+            if (has_fade) {
+                tx.vis_from = lo - 5.0f;
+                if (all_bounded) tx.vis_to = hi + 5.0f;
+            }
+        }
         tx.neon = true;
         auto& mat = spec.at("material");
         hex_linear(mat.at("color").get<string>(), tx.color_lin);
