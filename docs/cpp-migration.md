@@ -385,7 +385,8 @@ terminate（0xC0000409）。gen 端 26 例首轮即全清。修复后 **48/48 �
 （~120 行）= 旧 main + 参数解析，include 头文件后编译出同一个
 `dist/chamina-cpp.exe`。渲染公式零改动。
 
-**头文件结构**（生成器 `tmp/split.cjs` 从 chamina.cpp 拼装，可重跑）：
+**头文件结构**（一次性生成器 `tmp/split.cjs` 从 chamina.cpp 拼装；源文件
+已删，此后 **chamina.h 即唯一直接编辑的引擎源**，改动直接落在头文件里）：
 1. banner/用法文档 + include 守卫（`CHAMINA_H_INCLUDE`）；
 2. `namespace chamina` 公共 API 声明（仅 `<cstddef>/<cstdint>/<string>`）；
 3. `#ifdef CHAMINA_IMPLEMENTATION` → 引擎体 = 原 chamina.cpp 第 16–4177 行

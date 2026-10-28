@@ -110,9 +110,9 @@ main+参数解析，编译出同一个 `dist/chamina-cpp.exe`。
 - **嵌入验证**：`cpp/example/main.cpp`（自身定义 IMPLEMENTATION）独立编译
   运行成功，输出 PNG 与 CLI 静帧**逐字节相等**；仅声明 TU（不含
   IMPLEMENTATION）单独编译通过——stb 双 TU 用法成立。
-- 生成器 `tmp/split.cjs`（读 chamina.cpp 切引擎体 + 拼头尾，可重跑），
-  `tmp/chamina_head.txt`（banner+API 声明）、`tmp/chamina_api.inc`（API 实现）
-  是拆分源料；细节见 `docs/cpp-migration.md` §十三。
+- 一次性拆分工具 `tmp/split.cjs`（源料 `tmp/chamina_head.txt` banner/API
+  声明、`tmp/chamina_api.inc` API 实现；chamina.cpp 已删，此后 chamina.h
+  即唯一直接编辑的引擎源），细节见 `docs/cpp-migration.md` §十三。
 
 ## 1. 使命与现状
 
@@ -256,7 +256,8 @@ cpp/
 └─ vendor/             nlohmann/json.hpp, stb_truetype.h, earcut.hpp, stb_image_write.h
 dist/chamina-cpp.exe   交付产物（静态；CLI 薄壳 + 库，gen/audio/渲染三合一）
 dist/chamina-example.exe 嵌入示例产物
-tmp/split.cjs          chamina.h 生成器（+ tmp/chamina_head.txt、tmp/chamina_api.inc）
+tmp/split.cjs          一次性拆分工具（源料 tmp/chamina_head.txt、tmp/chamina_api.inc；
+                       chamina.cpp 已删，此后 chamina.h 即唯一直接编辑的引擎源）
 src/native/            Rust 参考实现（对照验收用）
 js/                    作者工具链——lrc2scene、audio-env 已 C++ 化（gen/audio
                        子命令）；未 C++ 化：editor、layout.mjs（gen --layout field）
