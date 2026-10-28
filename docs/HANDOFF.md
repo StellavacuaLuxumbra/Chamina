@@ -67,6 +67,19 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
   行为；管道断裂（stub ffmpeg）在 frame 1 响亮报错 exit 1，不假 done。
 - find_ffmpeg 顺带补 exe 相对路径解析（dist\chamina-cpp.exe 任意 cwd 可用）。
 
+## 0c. ✅ 崩溃/边界 fuzz 第一轮全清（2026-10-28）
+
+交接文档 §7.4 点名的全部边界项已人工矩阵化（48 例：渲染端突变 22 +
+gen LRC 边界 26），harness 判定 exit∈{0,1}=清，其余=崩。
+
+- **首轮 6 例崩溃**，全是同一类：渲染端 main 没有 try/catch，nlohmann
+  `out_of_range` 直抛 terminate。gen 端 26 例**首轮即全清**（LRC 解析器
+  手写正则语义，无异常逃逸）。
+- **修复**：main 拆出 render_main 整体兜底 + 入口兼容归一化扩容（缺字段
+  补默认值；合法场景零路径变化）。修复后 48/48 全清，t=8 门禁与 gen 字节
+  复核逐位不变。
+- 细节与例表见 `docs/cpp-migration.md` §十二。
+
 ## 1. 使命与现状
 
 用户目标：**整个项目彻底 C++ 化（字体/排版/动画/渲染全重写）= 交付软件
@@ -141,6 +154,8 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 | 9 | gen 报 unknown argument | argv 循环未跳过 `"gen"` token（分发入口自身） | main 的 gen 分支：跳过 argv[0]、argv[1] |
 | 10 | `[00:05.500]` 解析越界 | match_clock 带分数分支 len 公式多加 1（11 字节算出 12）→ substr 抛 | match_clock 小数分支：len = n + 1 + frac_len |
 | 11 | MinGW 编译 NOMINMAX 冲突 | windows.h 顺序敏感的重定义 | #ifndef NOMINMAX 守卫 |
+| 12 | 突变场景崩溃（0xC0000409）| 渲染端 main 无 try/catch，nlohmann .at() 的 out_of_range 直抛 terminate | main 拆出 render_main + 整体兜底（干净 exit 1）|
+| 13 | 老场景缺字段崩溃 | texts 无键/缺 material·position·size·alpha·animations、backgrounds 缺 top·bottom·accent·at、fps 缺失或 0、duration 缺失 | render_main 入口兼容归一化（默认=gen 旗标默认；warning 一次）|
 
 **对照语义的权威来源**：`js/anim.mjs`（相机/背景/命中包络）、
 `src/animation.rs`（字符动画）、`js/scene.js`（可视化/后处理公式）、
@@ -226,10 +241,12 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    - ~~`audio-env` → `chamina-cpp audio`~~（**已完成**，2026-10-28，见 §0b：
      ffmpeg 解码 + 手写同构 FFT，输出字节级一致，零新 vendored 库）；
    - editor（Web GUI）——低优先级。
-4. **下一个：崩溃/边界 fuzz**：gen 的 LRC 解析器是首选对象（空文件/截断
-   时钟/超长行/非法 UTF-8）；渲染端老项——空 texts、无 camera_animation、
-   单字场景、depth=0.001、fit_width=0——都应不崩（老场景兼容模式已开路）。
-5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十 与本文件。
+4. ~~崩溃/边界 fuzz 第一轮~~（**已完成**，2026-10-28，48 例全清，见 §0c 与
+   cpp-migration §十二）。**下一个：gen 第二阶段**——`--layout field` /
+   `--groups auto`（读 js/layout.mjs 741 行的 layoutField + PHRASE_CUTS/
+   WORD_SPLIT_SPECS/groupCharTimes；测试向量在 js/layout.test.mjs /
+   js/lrc.test.mjs）。可选自动化长跑：随机字节 LRC 语料。
+5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十二 与本文件。
 
 ## 8. 用户偏好（长期有效）
 

@@ -339,3 +339,40 @@ node 行为一致；中文输入路径实测通过。分析耗时 ~4.7s（node �
 拼进错误消息，C++ 端透传到自身 stderr + 报 exit code——信息不丢失，文本
 不逐字一致；NaN hop 在 node 会静默产出垃圾文件，C++ 端按 audio too short
 报错（仅错误路径差异，合法输入输出不受影响）。
+
+
+## 十二、崩溃/边界 fuzz 第一轮（2026-10-28，48 例全清）
+
+**harness**：node spawnSync 喂二进制（typed shell 参数在此 harness 会 GBK
+双重损坏，spawnSync 的 UTF-16 通道不受影响；真实 cmd 用法不受影响）。
+判定：exit∈{0,1}=清；Windows 崩溃码族（0xC0000005 段错 / 0xC0000409
+abort）=崩。harness 在 tmp/fuzz/harness.mjs（不入库）。
+
+**渲染端 22 例**（bird.json 突变）：空 texts / 无 texts 键 / 无
+camera_animation / 单字场景 / depth=0.001 与 0 / fit_width=0（部分与全部）/ 
+animations 空 / 未知动画类型 / 无 material / 无 position / size=500 /
+1e308 级坐标 / 空 backgrounds / 无 fx·bloom·dof / fps=0 / fps 缺失 /
+duration 缺失 / char_times 截断 / char_times=null / bg 只填 color_a 一个字段。
+
+**gen 端 26 例**：空文件 / 纯空白 / 无时间戳文本 / 截断时钟（`[00:`、
+`[00:06`、`[]`、`[:]`）/ offset 非数 / 负 offset / 多时间戳重复行 / 残缺
+`<0:0.>` 逐字戳 / 50000 码点长行 / 3000 行 / 非法 UTF-8 字节 / BOM / CR-only
+/ CRLF / 未知与空 `{e:}` 标签 / 重复 meta / 未来时间戳 / 极短歌+--tail 0 /
+fps=0 / size=0 / depth=0 / fit-width=0 / offset=1e18 / radius=0.0001。
+
+**结果**：首轮 6 例崩溃——渲染端无 try/catch，nlohmann `out_of_range` 直抛
+terminate（0xC0000409）。gen 端 26 例首轮即全清。修复后 **48/48 全清**。
+
+**修复**（双层防御）：
+1. main() 拆出 `render_main()`，main 里整体 try/catch → 任何异常干净
+   exit 1（gen/audio 子命令本就有各自的 try/catch）；
+2. render_main 入口的「老场景兼容归一化」扩容：texts 逐项补
+   text/position/size/alpha/animations/material（默认值=gen 旗标默认）、
+   backgrounds 逐项补 top/bottom/accent/at（中性天空色）、fps 缺失/非法→
+   30、duration 缺失→300。一次 stderr warning，合法场景零路径变化。
+
+**归一化不改变合法画面**的复核：t=8 门禁四区比值 1.005/1.014/1.030/1.020
+与扩容前逐位一致；gen bird/sample 字节级一致；60 帧视频段管道正常（~6fps）。
+
+**遗留 fuzz 面**（未做，供后续）：随机字节 LRC 语料长跑、场景 JSON 的
+自动化深度突变；char_times 元素混型的运行期守卫已加（is_number）。

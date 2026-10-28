@@ -4175,6 +4175,8 @@ static vector<string> utf8_argv(int argc, char** argv) {
 }
 #endif
 
+static int render_main(int argc, char** argv);  // defined after main; guarded there
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     // cmd.exe hands argv over in the ANSI codepage; re-decode to UTF-8 so
@@ -4194,6 +4196,21 @@ int main(int argc, char** argv) {
         return gen_main(argc - 1, argv + 1);
     if (argc >= 2 && string(argv[1]) == "audio")
         return audio_main(argc - 1, argv + 1);
+    // One guard around the whole renderer: malformed scenes must surface a
+    // clean error (exit 1), never an uncaught nlohmann exception (which
+    // Windows reports as exit 0xC000046D-style crash codes).
+    try {
+        return render_main(argc, argv);
+    } catch (const exception& e) {
+        fprintf(stderr, "error: %s\n", e.what());
+        return 1;
+    } catch (...) {
+        fprintf(stderr, "error: unknown exception\n");
+        return 1;
+    }
+}
+
+static int render_main(int argc, char** argv) {
     string input, audio_env_path, out = "cpp_out.mp4", png;
     float still = -1;
     unsigned from = 0, frames = 0;
@@ -4218,12 +4235,120 @@ int main(int argc, char** argv) {
     // scene/audio-env read through read_file: MinGW's ifstream(char*) opens
     // via the ANSI codepage and fails on Chinese paths.
     json scene = json::parse(read_file(input));
+
+    // Malformed / minimal scene compat: fill in what older or hand-made
+    // scenes omit (defaults mirror gen's own flags) instead of hard-throwing.
+    // Valid scenes never hit these paths. One warning, once.
+    {
+        bool warned = false;
+        auto warn_once = [&]() {
+            if (!warned) {
+                fprintf(stderr, "[cpp] warn: scene had missing/invalid fields — filled with defaults\n");
+                warned = true;
+            }
+        };
+        if (!scene.contains("texts") || !scene["texts"].is_array()) {
+            scene["texts"] = json::array();
+            warn_once();
+        }
+        for (auto& t : scene["texts"]) {
+            if (!t.is_object()) {
+                t = json::object();
+                warn_once();
+            }
+            auto ensure_text = [&](const char* k, const char* d) {
+                if (!t.contains(k) || !t[k].is_string()) {
+                    t[k] = d;
+                    warn_once();
+                }
+            };
+            ensure_text("text", "");
+            if (!t.contains("position") || !t["position"].is_array() ||
+                t["position"].size() < 3 || !t["position"][0].is_number() ||
+                !t["position"][1].is_number() || !t["position"][2].is_number()) {
+                t["position"] = json::array({0.0, -0.4, 0.09});
+                warn_once();
+            }
+            if (!t.contains("size") || !t["size"].is_number()) {
+                t["size"] = 1.4;
+                warn_once();
+            }
+            if (!t.contains("alpha") || !t["alpha"].is_number()) {
+                t["alpha"] = 1.0;
+                warn_once();
+            }
+            if (!t.contains("animations") || !t["animations"].is_array()) {
+                t["animations"] = json::array();
+                warn_once();
+            } else
+                for (auto& an : t["animations"])
+                    if (!an.is_object()) {
+                        an = json::object();
+                        warn_once();
+                    }
+            if (!t.contains("material") || !t["material"].is_object()) {
+                t["material"] = json{{"color", "#ffffff"}, {"strength", 1.6}};
+                warn_once();
+            } else {
+                auto& m = t["material"];
+                if (!m.contains("color") || !m["color"].is_string()) {
+                    m["color"] = "#ffffff";
+                    warn_once();
+                }
+                if (m.contains("outline") && !m["outline"].is_object()) {
+                    m.erase("outline");  // malformed rim → treat as none
+                    warn_once();
+                } else if (m.contains("outline") &&
+                           (!m["outline"].contains("color") ||
+                            !m["outline"]["color"].is_string())) {
+                    m.erase("outline");
+                    warn_once();
+                }
+            }
+        }
+        if (!scene.contains("backgrounds") || !scene["backgrounds"].is_array())
+            scene["backgrounds"] = json::array();
+        for (auto& bg : scene["backgrounds"]) {
+            if (!bg.is_object()) {
+                bg = json::object();
+                warn_once();
+            }
+            auto ensure_str = [&](const char* k, const char* d) {
+                if (!bg.contains(k) || !bg[k].is_string()) {
+                    bg[k] = d;
+                    warn_once();
+                }
+            };
+            // Neutral sky so a half-filled key stays visible rather than fatal.
+            ensure_str("top", "#0a1020");
+            ensure_str("bottom", "#05070f");
+            ensure_str("accent", "#3a4a66");
+            if (!bg.contains("at") || !bg["at"].is_number()) {
+                bg["at"] = 0.0;
+                warn_once();
+            }
+        }
+    }
+
     // The authored scene carries its settings at the root (no meta wrapper).
     json meta = scene;
     meta.erase("texts");
-    if (!meta.contains("total_frames"))
-        meta["total_frames"] =
-            (unsigned)ceil(meta.at("duration").get<float>() * meta.at("fps").get<float>());
+    {
+        bool fps_ok = meta.contains("fps") && meta["fps"].is_number() &&
+                      meta["fps"].get<float>() > 0;
+        bool dur_ok = meta.contains("duration") && meta["duration"].is_number();
+        if (!fps_ok) {
+            meta["fps"] = 30;
+            fprintf(stderr, "[cpp] warn: scene fps missing/invalid — defaulting to 30\n");
+        }
+        if (!dur_ok) {
+            meta["duration"] = 300;
+            fprintf(stderr, "[cpp] warn: scene duration missing — defaulting to 300s\n");
+        }
+        if (!meta.contains("total_frames"))
+            meta["total_frames"] =
+                (unsigned)ceil(meta.at("duration").get<float>() * meta.at("fps").get<float>());
+    }
     // Older / minimal scenes may omit whole sections; normalise once so every
     // downstream .at() is safe.
     if (!meta.contains("fx")) meta["fx"] = json{{"enabled", false}};
@@ -4352,7 +4477,8 @@ int main(int argc, char** argv) {
             for (const auto& a : spec.at("animations")) {
                 if (a.value("type", "") == "fade") {
                     float sa = a.value("start_at", 0.0f), stg = a.value("stagger", 0.04f);
-                    if (cts && gi < cts->size()) ch.lands_at = (*cts)[gi].get<float>();
+                    if (cts && gi < cts->size() && (*cts)[gi].is_number())
+                        ch.lands_at = (*cts)[gi].get<float>();
                     else ch.lands_at = sa + (float)gi * stg;
                 }
             }
