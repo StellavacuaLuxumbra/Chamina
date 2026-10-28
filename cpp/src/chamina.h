@@ -1,18 +1,104 @@
-// chamina C++ — the whole engine in one translation unit.
+// chamina.h — the whole Chamina engine as a single-header C++ library.
 //
-// Pipeline: scenes/<name>.json → stb_truetype glyph outlines → earcut
-// tessellation (even-odd holes, like the Rust mesher's EvenOdd fill) →
-// extrusion → per-frame animation eval (ported from src/animation.rs) →
-// software raster + post (ported from src/native) → ffmpeg rawvideo pipe.
+// The deliverable software: fonts (stb_truetype), layout, extruded-glyph
+// meshes (earcut), animation/camera/backgrounds (ports of js/anim.mjs +
+// src/animation.rs), software rasterizer, full audio visualisation and the
+// post chain, plus the two content subcommands (gen: LRC→scene JSON;
+// audio: track→spectrum envelope). Drop-in, stb-style:
 //
-// Every formula is a line-for-line port of the Rust/JS pair; see the comment
-// beside each section for the source file it mirrors.
+//   #define CHAMINA_IMPLEMENTATION      // in exactly one .cpp
+//   #include "chamina.h"
 //
-//   g++ -O2 -std=c++17 -fopenmp -I../vendor chamina.cpp -o chamina-cpp.exe
+// Other translation units include the header for the API only. Compile the
+// implementation TU with -fopenmp for multithreaded rendering (optional —
+// the header also builds single-threaded); on Windows add -lshell32
+// (CommandLineToArgvW). The vendored single-header dependencies
+// (nlohmann/json.hpp, stb_truetype.h, mapbox/earcut.hpp, stb_image_write.h)
+// are found through the include path (cpp/vendor in this repo).
 //
-//   chamina-cpp scenes/bird.json --audio-env target/chamina/audio_env.json
-//       -o out.mp4 [--from N] [--frames N] [--still t --png f]
+// Minimal embedder:
+//
+//   #define CHAMINA_IMPLEMENTATION
+//   #include "chamina.h"
+//
+//   int main() {
+//     std::string scene, env;
+//     chamina::read_file("scenes/bird.json", scene);
+//     chamina::read_file("target/chamina/audio_env.json", env);
+//     char err[512];
+//     auto* e = chamina::engine_create(scene.c_str(), env.c_str(), err, sizeof err);
+//     if (!e) { fprintf(stderr, "error: %s\n", err); return 1; }
+//     std::vector<unsigned char> rgb((size_t)chamina::engine_width(e) *
+//                                    chamina::engine_height(e) * 3);
+//     chamina::engine_render_rgb(e, 8.0f, rgb.data());    // RGB24, sRGB, post applied
+//     chamina::engine_still_png(e, 20.35f, "frame.png");  // or straight to PNG
+//     chamina::engine_encode_video(e, 0, 0, "out.mp4");   // 0 frames = to the end
+//     chamina::engine_destroy(e);
+//   }
+//
+// Scene JSON contract: whatever js/lrc2scene.mjs / `chamina-cpp gen` emits
+// (fields at the root, no meta wrapper). The audio-env JSON is optional;
+// without it the spectrum ring/bars/sparks/呼吸 components stay off.
+// Not thread-safe across engines: frame buffers are static by design
+// (parity with the original single-TU engine).
+#ifndef CHAMINA_H_INCLUDE
+#define CHAMINA_H_INCLUDE
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace chamina {
+
+// Opaque engine: parsed scene + fonts + prepared meshes.
+struct Engine;
+
+// Build an engine from UTF-8 JSON strings. audio_env_json may be null/empty.
+// On failure returns nullptr and fills err (when err_cap > 0).
+Engine* engine_create(const char* scene_json, const char* audio_env_json,
+                      char* err, int err_cap);
+void engine_destroy(Engine*);
+
+// Render frame at time t (seconds) into rgb: width*height*3 bytes, RGB,
+// full post chain applied. Never throws; on internal error the buffer is
+// zeroed and a message goes to stderr.
+void engine_render_rgb(Engine*, float t, unsigned char* rgb);
+
+// Render + encode a PNG at a UTF-8 path. Returns 0 on success, 1 on error.
+int engine_still_png(Engine*, float t, const char* png_path);
+
+// Encode frames [from, from+frames) at the scene fps into an mp4 via the
+// ffmpeg pipe (bundled installer / CHAMINA_FFMPEG / PATH). frames == 0
+// means "until the end". Returns 0 on success, 1 on error. Progress goes
+// to stderr; CPP_PROF=1 keeps the per-stage profiling report.
+int engine_encode_video(Engine*, unsigned from, unsigned frames,
+                        const char* out_path);
+
+int engine_width(const Engine*);
+int engine_height(const Engine*);
+unsigned engine_fps(const Engine*);
+unsigned engine_total_frames(const Engine*);
+
+// Per-frame trace prints (also enabled by env CPP_TRACE=1 at engine_create).
+void set_trace(bool on);
+
+// Windows-codepage-proof file read (UTF-8 in, Chinese paths fine).
+// Returns false and leaves out empty on failure.
+bool read_file(const char* path, std::string& out);
+
+// Windows: re-decode the process command line to UTF-8 and return a new
+// argv (valid for the program's lifetime); other platforms pass through.
+char** argv_utf8(int argc, char** argv, int* out_argc);
+
+// CLI-shaped content tools — the exe is a thin wrapper around these.
+// argv[0] is the subcommand token itself ("gen" / "audio"), exactly as the
+// node tools see their own process.argv.slice(1).
+int gen_main(int argc, char** argv);    // LRC → scene JSON
+int audio_main(int argc, char** argv);  // audio → spectrum envelope JSON
+
+} // namespace chamina
+
+#ifdef CHAMINA_IMPLEMENTATION
 #include "json.hpp"
 #include "earcut.hpp"
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -4175,386 +4261,394 @@ static vector<string> utf8_argv(int argc, char** argv) {
 }
 #endif
 
-static int render_main(int argc, char** argv);  // defined after main; guarded there
+// ---------------------------------------------------------------------------
+// Public API implementation. This section used to be render_main() + main()
+// in the single-TU engine: the scene parsing / font / mesh assembly moved
+// into engine_create, the still branch into engine_still_png and the video
+// branch into engine_encode_video. Everything above this section is the
+// untouched engine core (only the file header comment and main() were
+// dropped).
+// ---------------------------------------------------------------------------
+namespace chamina {
 
-int main(int argc, char** argv) {
-#ifdef _WIN32
-    // cmd.exe hands argv over in the ANSI codepage; re-decode to UTF-8 so
-    // Chinese paths and text flags survive into JSON (mirrors how node
-    // receives the same bytes as UTF-16 → UTF-8).
-    static vector<string> argv_hold;
-    static vector<char*> argv_p;
-    {
-        argv_hold = utf8_argv(argc, argv);
-        for (auto& s : argv_hold) argv_p.push_back(&s[0]);
-        argv_p.push_back(nullptr);
-        argc = (int)argv_hold.size();
-        argv = argv_p.data();
-    }
-#endif
-    if (argc >= 2 && string(argv[1]) == "gen")
-        return gen_main(argc - 1, argv + 1);
-    if (argc >= 2 && string(argv[1]) == "audio")
-        return audio_main(argc - 1, argv + 1);
-    // One guard around the whole renderer: malformed scenes must surface a
-    // clean error (exit 1), never an uncaught nlohmann exception (which
-    // Windows reports as exit 0xC000046D-style crash codes).
+struct Engine {
+    Engine(const json& s, const json& m) : scene(s), meta(m), world(scene, meta) {}
+    // scene must outlive the meshes: PreparedText::anims / char_times point
+    // into it (same lifetime rule as the original single-TU render_main).
+    json scene;
+    json meta;   // root settings (texts erased) — what finish() reads
+    World world;
+    FontEngine fe;
+    int w = 0, h = 0;
+    unsigned fps = 0, total = 0;
+};
+
+Engine* engine_create(const char* scene_json, const char* audio_env_json,
+                      char* err, int err_cap) {
+    auto fail = [&](const char* msg) -> Engine* {
+        if (err && err_cap > 0) snprintf(err, (size_t)err_cap, "%s", msg);
+        return nullptr;
+    };
     try {
-        return render_main(argc, argv);
-    } catch (const exception& e) {
-        fprintf(stderr, "error: %s\n", e.what());
-        return 1;
+        json scene = json::parse(scene_json ? scene_json : "");
+
+        // Malformed / minimal scene compat: fill in what older or hand-made
+        // scenes omit (defaults mirror gen's own flags) instead of hard-throwing.
+        // Valid scenes never hit these paths. One warning, once.
+        {
+            bool warned = false;
+            auto warn_once = [&]() {
+                if (!warned) {
+                    fprintf(stderr, "[cpp] warn: scene had missing/invalid fields — filled with defaults\n");
+                    warned = true;
+                }
+            };
+            if (!scene.contains("texts") || !scene["texts"].is_array()) {
+                scene["texts"] = json::array();
+                warn_once();
+            }
+            for (auto& t : scene["texts"]) {
+                if (!t.is_object()) {
+                    t = json::object();
+                    warn_once();
+                }
+                auto ensure_text = [&](const char* k, const char* d) {
+                    if (!t.contains(k) || !t[k].is_string()) {
+                        t[k] = d;
+                        warn_once();
+                    }
+                };
+                ensure_text("text", "");
+                if (!t.contains("position") || !t["position"].is_array() ||
+                    t["position"].size() < 3 || !t["position"][0].is_number() ||
+                    !t["position"][1].is_number() || !t["position"][2].is_number()) {
+                    t["position"] = json::array({0.0, -0.4, 0.09});
+                    warn_once();
+                }
+                if (!t.contains("size") || !t["size"].is_number()) {
+                    t["size"] = 1.4;
+                    warn_once();
+                }
+                if (!t.contains("alpha") || !t["alpha"].is_number()) {
+                    t["alpha"] = 1.0;
+                    warn_once();
+                }
+                if (!t.contains("animations") || !t["animations"].is_array()) {
+                    t["animations"] = json::array();
+                    warn_once();
+                } else
+                    for (auto& an : t["animations"])
+                        if (!an.is_object()) {
+                            an = json::object();
+                            warn_once();
+                        }
+                if (!t.contains("material") || !t["material"].is_object()) {
+                    t["material"] = json{{"color", "#ffffff"}, {"strength", 1.6}};
+                    warn_once();
+                } else {
+                    auto& m = t["material"];
+                    if (!m.contains("color") || !m["color"].is_string()) {
+                        m["color"] = "#ffffff";
+                        warn_once();
+                    }
+                    if (m.contains("outline") && !m["outline"].is_object()) {
+                        m.erase("outline");  // malformed rim → treat as none
+                        warn_once();
+                    } else if (m.contains("outline") &&
+                               (!m["outline"].contains("color") ||
+                                !m["outline"]["color"].is_string())) {
+                        m.erase("outline");
+                        warn_once();
+                    }
+                }
+            }
+            if (!scene.contains("backgrounds") || !scene["backgrounds"].is_array())
+                scene["backgrounds"] = json::array();
+            for (auto& bg : scene["backgrounds"]) {
+                if (!bg.is_object()) {
+                    bg = json::object();
+                    warn_once();
+                }
+                auto ensure_str = [&](const char* k, const char* d) {
+                    if (!bg.contains(k) || !bg[k].is_string()) {
+                        bg[k] = d;
+                        warn_once();
+                    }
+                };
+                // Neutral sky so a half-filled key stays visible rather than fatal.
+                ensure_str("top", "#0a1020");
+                ensure_str("bottom", "#05070f");
+                ensure_str("accent", "#3a4a66");
+                if (!bg.contains("at") || !bg["at"].is_number()) {
+                    bg["at"] = 0.0;
+                    warn_once();
+                }
+            }
+        }
+
+        // The authored scene carries its settings at the root (no meta wrapper).
+        json meta = scene;
+        meta.erase("texts");
+        {
+            bool fps_ok = meta.contains("fps") && meta["fps"].is_number() &&
+                          meta["fps"].get<float>() > 0;
+            bool dur_ok = meta.contains("duration") && meta["duration"].is_number();
+            if (!fps_ok) {
+                meta["fps"] = 30;
+                fprintf(stderr, "[cpp] warn: scene fps missing/invalid — defaulting to 30\n");
+            }
+            if (!dur_ok) {
+                meta["duration"] = 300;
+                fprintf(stderr, "[cpp] warn: scene duration missing — defaulting to 300s\n");
+            }
+            if (!meta.contains("total_frames"))
+                meta["total_frames"] =
+                    (unsigned)ceil(meta.at("duration").get<float>() * meta.at("fps").get<float>());
+        }
+        // Older / minimal scenes may omit whole sections; normalise once so every
+        // downstream .at() is safe.
+        if (!meta.contains("fx")) meta["fx"] = json{{"enabled", false}};
+        if (!meta.contains("bloom")) meta["bloom"] = json{{"enabled", false}};
+        if (!meta.contains("dof")) meta["dof"] = json{{"enabled", false}};
+        if (!meta.contains("backgrounds")) meta["backgrounds"] = json::array();
+        if (!meta.contains("camera"))
+            meta["camera"] = json{{"fov", 0.8726646f}, {"near", 0.01f}, {"far", 500.0f}};
+
+        Engine* e = new Engine(scene, meta);
+
+        TRACE = getenv("CPP_TRACE") != nullptr;
+        if (audio_env_json && *audio_env_json) {
+            json ej = json::parse(audio_env_json);
+            e->world.env.fps = ej.value("fps", 60.0f);
+            for (const auto& row : ej.at("data")) e->world.env.data.push_back(row.get<vector<float>>());
+            e->world.has_env = true;
+        }
+
+        // fonts
+        bool font_ok = false;
+        for (const auto& f : meta.value("font_fallback", json::array())) {
+            if (e->fe.open(f.get<string>())) {
+                font_ok = true;
+                break;
+            }
+        }
+        if (!font_ok) {
+            delete e;
+            return fail("no usable font");
+        }
+
+        float duration = meta.at("total_frames").get<float>() / meta.at("fps").get<float>();
+        (void)duration;
+        e->world.prepare({});
+        // cues/outro/first-lyric are computed in prepare() — they need env-independent
+        // info only, fine.
+
+        for (const auto& spec : e->scene.at("texts")) {
+            PreparedText tx;
+            tx.position = Vec3{spec.at("position")[0].get<float>(),
+                               spec.at("position")[1].get<float>(),
+                               spec.at("position")[2].get<float>()};
+            tx.size = spec.at("size").get<float>();
+            tx.alpha = spec.value("alpha", 1.0f);
+            tx.anims = &spec.at("animations");
+            tx.char_times = spec.contains("char_times") ? &spec.at("char_times") : nullptr;
+            {
+                // Fade anims define the block's visible span: first char becomes
+                // visible at ~min(start_at), all fade out by max(fade_out_at +
+                // fade_out). A ±5s margin absorbs char_times/stagger edges. If any
+                // fade lacks fade_out_at the block stays visible indefinitely, so
+                // the upper bound is left open. Conservative: worst case we
+                // evaluate a block whose chars are all transparent — never the
+                // reverse.
+                bool has_fade = false, all_bounded = true;
+                float lo = INFINITY, hi = -INFINITY;
+                for (const auto& a : spec.at("animations")) {
+                    if (a.value("type", "") != "fade") continue;
+                    has_fade = true;
+                    lo = min(lo, a.value("start_at", 0.0f));
+                    auto fo_it = a.find("fade_out_at");
+                    if (fo_it != a.end() && fo_it->is_number())
+                        hi = max(hi, fo_it->get<float>() + a.value("fade_out", 0.45f));
+                    else
+                        all_bounded = false;
+                }
+                if (has_fade) {
+                    tx.vis_from = lo - 5.0f;
+                    if (all_bounded) tx.vis_to = hi + 5.0f;
+                }
+            }
+            tx.neon = true;
+            auto& mat = spec.at("material");
+            hex_linear(mat.at("color").get<string>(), tx.color_lin);
+            tx.strength = mat.value("strength", 1.0f);
+            for (int k = 0; k < 3; k++) tx.color_lin[k] *= tx.strength;
+            tx.has_outline = mat.contains("outline");
+            if (tx.has_outline) {
+                hex_linear(mat.at("outline").at("color").get<string>(), tx.outline_lin);
+                tx.outline_strength = mat.at("outline").value("strength", 1.0f);
+                for (int k = 0; k < 3; k++) tx.outline_lin[k] *= tx.outline_strength;
+            }
+            // layout (port of src/text/layout.rs)
+            const string& text = spec.at("text").get<string>();
+            float cursor = 0, max_asc = -1e30f, min_desc = 1e30f;
+            struct Item {
+                uint32_t cp;
+                int glyph;
+                float advance_em, center_x;
+            };
+            vector<Item> items;
+            for (size_t i = 0; i < text.size();) {
+                size_t nx;
+                uint32_t cp = e->fe.codepoint(text, i, nx);
+                i = nx;
+                int glyph = e->fe.find_glyph(cp);
+                float adv, lsb;
+                e->fe.h_metrics(glyph, adv, lsb);
+                max_asc = max(max_asc, e->fe.ascender);
+                min_desc = min(min_desc, e->fe.descender);
+                items.push_back({cp, glyph, adv, cursor + adv * 0.5f});
+                cursor += adv;
+            }
+            float total_width = cursor;
+            float line_center_y = (max_asc + min_desc) * 0.5f;
+            float half = total_width * 0.5f;
+            // fit_width (port of export::build)
+            float size = tx.size;
+            if (spec.contains("fit_width")) {
+                float budget = spec.at("fit_width").get<float>();
+                float w = total_width * size;
+                if (w > budget && budget > 0 && w > 0) size *= budget / w;
+            }
+            tx.size = size;
+            tx.total_width_em = total_width;
+            float depth = spec.value("depth", 0.09f);
+            const json* cts = tx.char_times;
+            for (size_t gi = 0; gi < items.size(); gi++) {
+                auto& it = items[gi];
+                float cx_local = it.center_x - half;
+                float cy_local = -line_center_y;
+                bool empty = it.glyph == 0 || e->fe.glyph_empty(it.glyph);
+                PreparedChar ch;
+                ch.idx = gi;
+                ch.lands_at = 0;
+                for (const auto& a : spec.at("animations")) {
+                    if (a.value("type", "") == "fade") {
+                        float sa = a.value("start_at", 0.0f), stg = a.value("stagger", 0.04f);
+                        if (cts && gi < cts->size() && (*cts)[gi].is_number())
+                            ch.lands_at = (*cts)[gi].get<float>();
+                        else ch.lands_at = sa + (float)gi * stg;
+                    }
+                }
+                if (empty) {
+                    // no mesh, but the char still occupies the index stream
+                    tx.chars.push_back(move(ch));
+                    continue;
+                }
+                if (TRACE) {
+                    fprintf(stderr, "[trace] mesh glyph=%d\n", it.glyph);
+                    fflush(stderr);
+                }
+                float org_x = 0, org_y = 0;
+                if (!build_glyph_mesh(e->fe, it.glyph, depth, ch.mesh, org_x, org_y)) {
+                    tx.chars.push_back(move(ch));
+                    continue;
+                }
+                // base_position: position + R*((center - adv/2 + origin) * size)
+                Vec3 local{(cx_local - it.advance_em * 0.5f + org_x) * size,
+                           (cy_local + org_y) * size, 0};
+                ch.base_position = tx.position + local;
+                if (tx.has_outline) {
+                    float ow = mat_outline_width(spec);
+                    ch.hull = smooth_hull(ch.mesh, ow);
+                }
+                tx.chars.push_back(move(ch));
+            }
+            tx.hw = clamp(tx.total_width_em * tx.size * 0.5f, 1.0f, 9.0f);
+            e->world.texts.push_back(move(tx));
+        }
+        // sparks need hw — rebuild after texts
+        {
+            uint32_t r = 0;
+            for (size_t bi = 0; bi < e->world.texts.size(); bi++) {
+                auto& tx = e->world.texts[bi];
+                float cue = INFINITY;
+                for (const auto& a : tx.anims->items()) {
+                    const json& aj = a.value();
+                    if (aj.value("type", "") == "fade") cue = aj.value("start_at", 0.0f);
+                }
+                if (!isfinite(cue)) continue;
+                r = (uint32_t)(bi * 131 + 7);
+                for (int k = 0; k < 14; k++) {
+                    Sparks::P sp;
+                    sp.pos = tx.position +
+                             Vec3{(mulberry_f(r) * 2 - 1) * tx.hw * 1.05f,
+                                  (mulberry_f(r) * 2 - 1) * 0.85f, (mulberry_f(r) - 0.5f) * 0.6f};
+                    sp.cue = cue + mulberry_f(r) * 0.15f;
+                    for (int c = 0; c < 3; c++) sp.color[c] = tx.color_lin[c];
+                    sp.s0 = (float)M_PI * (0.15f + 0.7f * mulberry_f(r));
+                    sp.s1 = 0.5f + mulberry_f(r) * 1.6f;
+                    sp.s2 = 2.0f + mulberry_f(r) * 4.0f;
+                    e->world.sparks.p.push_back(sp);
+                }
+            }
+        }
+
+        e->w = meta.at("width").get<int>();
+        e->h = meta.at("height").get<int>();
+        e->fps = meta.at("fps").get<unsigned>();
+        e->total = meta.at("total_frames").get<unsigned>();
+        if (err && err_cap > 0) err[0] = '\0';
+        return e;
+    } catch (const exception& ex) {
+        return fail(ex.what());
     } catch (...) {
-        fprintf(stderr, "error: unknown exception\n");
-        return 1;
+        return fail("unknown exception");
     }
 }
 
-static int render_main(int argc, char** argv) {
-    string input, audio_env_path, out = "cpp_out.mp4", png;
-    float still = -1;
-    unsigned from = 0, frames = 0;
-    for (int i = 1; i < argc; i++) {
-        string a = argv[i];
-        auto next = [&]() { return string(argv[++i]); };
-        if (a == "--audio-env") audio_env_path = next();
-        else if (a == "-o" || a == "--out") out = next();
-        else if (a == "--still") still = stof(next());
-        else if (a == "--png") png = next();
-        else if (a == "--from") from = stoul(next());
-        else if (a == "--frames") frames = stoul(next());
-        else if (!a.empty() && a[0] != '-') input = a;
-    }
-    if (input.empty()) {
-        fprintf(stderr, "usage: chamina-cpp <scene.json> [--audio-env f] -o out.mp4 "
-                        "[--from n] [--frames n] [--still t --png f]\n"
-                        "       chamina-cpp gen <song.lrc> -o scene.json [--help]\n"
-                        "       chamina-cpp audio <audio-file> -o audio_env.json\n");
-        return 1;
-    }
-    // scene/audio-env read through read_file: MinGW's ifstream(char*) opens
-    // via the ANSI codepage and fails on Chinese paths.
-    json scene = json::parse(read_file(input));
+void engine_destroy(Engine* e) { delete e; }
 
-    // Malformed / minimal scene compat: fill in what older or hand-made
-    // scenes omit (defaults mirror gen's own flags) instead of hard-throwing.
-    // Valid scenes never hit these paths. One warning, once.
-    {
-        bool warned = false;
-        auto warn_once = [&]() {
-            if (!warned) {
-                fprintf(stderr, "[cpp] warn: scene had missing/invalid fields — filled with defaults\n");
-                warned = true;
-            }
-        };
-        if (!scene.contains("texts") || !scene["texts"].is_array()) {
-            scene["texts"] = json::array();
-            warn_once();
-        }
-        for (auto& t : scene["texts"]) {
-            if (!t.is_object()) {
-                t = json::object();
-                warn_once();
-            }
-            auto ensure_text = [&](const char* k, const char* d) {
-                if (!t.contains(k) || !t[k].is_string()) {
-                    t[k] = d;
-                    warn_once();
-                }
-            };
-            ensure_text("text", "");
-            if (!t.contains("position") || !t["position"].is_array() ||
-                t["position"].size() < 3 || !t["position"][0].is_number() ||
-                !t["position"][1].is_number() || !t["position"][2].is_number()) {
-                t["position"] = json::array({0.0, -0.4, 0.09});
-                warn_once();
-            }
-            if (!t.contains("size") || !t["size"].is_number()) {
-                t["size"] = 1.4;
-                warn_once();
-            }
-            if (!t.contains("alpha") || !t["alpha"].is_number()) {
-                t["alpha"] = 1.0;
-                warn_once();
-            }
-            if (!t.contains("animations") || !t["animations"].is_array()) {
-                t["animations"] = json::array();
-                warn_once();
-            } else
-                for (auto& an : t["animations"])
-                    if (!an.is_object()) {
-                        an = json::object();
-                        warn_once();
-                    }
-            if (!t.contains("material") || !t["material"].is_object()) {
-                t["material"] = json{{"color", "#ffffff"}, {"strength", 1.6}};
-                warn_once();
-            } else {
-                auto& m = t["material"];
-                if (!m.contains("color") || !m["color"].is_string()) {
-                    m["color"] = "#ffffff";
-                    warn_once();
-                }
-                if (m.contains("outline") && !m["outline"].is_object()) {
-                    m.erase("outline");  // malformed rim → treat as none
-                    warn_once();
-                } else if (m.contains("outline") &&
-                           (!m["outline"].contains("color") ||
-                            !m["outline"]["color"].is_string())) {
-                    m.erase("outline");
-                    warn_once();
-                }
-            }
-        }
-        if (!scene.contains("backgrounds") || !scene["backgrounds"].is_array())
-            scene["backgrounds"] = json::array();
-        for (auto& bg : scene["backgrounds"]) {
-            if (!bg.is_object()) {
-                bg = json::object();
-                warn_once();
-            }
-            auto ensure_str = [&](const char* k, const char* d) {
-                if (!bg.contains(k) || !bg[k].is_string()) {
-                    bg[k] = d;
-                    warn_once();
-                }
-            };
-            // Neutral sky so a half-filled key stays visible rather than fatal.
-            ensure_str("top", "#0a1020");
-            ensure_str("bottom", "#05070f");
-            ensure_str("accent", "#3a4a66");
-            if (!bg.contains("at") || !bg["at"].is_number()) {
-                bg["at"] = 0.0;
-                warn_once();
-            }
-        }
+// Shared per-frame tail for the direct-API paths (render_rgb / still_png):
+// render + audio-reactive flash + post chain. The flash formula is the
+// video branch's, kept verbatim from render_main. encode_video keeps its
+// own inline copy because it interleaves per-stage profiling between the
+// stages (CPP_PROF), which this helper must not distort.
+static void engine_render_frame(Engine* e, float t, vector<uint8_t>& rgb) {
+    static Frame fr;
+    e->world.render_frame_into(t, fr);
+    auto& fx = e->meta.at("fx");
+    float flash = 0;
+    if (fx.value("enabled", false)) {
+        float bands[64], bass, energy;
+        e->world.env.sample(t, bands, bass, energy);
+        float hit = hit_envelope(e->world.cues, t, fx.value("hit_duration", 0.35f));
+        flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
     }
+    finish(fr, e->meta, flash, rgb);  // fills in place, keeps rgb's capacity
+}
 
-    // The authored scene carries its settings at the root (no meta wrapper).
-    json meta = scene;
-    meta.erase("texts");
-    {
-        bool fps_ok = meta.contains("fps") && meta["fps"].is_number() &&
-                      meta["fps"].get<float>() > 0;
-        bool dur_ok = meta.contains("duration") && meta["duration"].is_number();
-        if (!fps_ok) {
-            meta["fps"] = 30;
-            fprintf(stderr, "[cpp] warn: scene fps missing/invalid — defaulting to 30\n");
-        }
-        if (!dur_ok) {
-            meta["duration"] = 300;
-            fprintf(stderr, "[cpp] warn: scene duration missing — defaulting to 300s\n");
-        }
-        if (!meta.contains("total_frames"))
-            meta["total_frames"] =
-                (unsigned)ceil(meta.at("duration").get<float>() * meta.at("fps").get<float>());
+void engine_render_rgb(Engine* e, float t, unsigned char* rgb) {
+    if (!e || !rgb) return;
+    size_t n = (size_t)e->w * (size_t)e->h * 3;
+    try {
+        static vector<uint8_t> buf;  // reused across frames (capacity retained)
+        engine_render_frame(e, t, buf);
+        if (n && buf.size() >= n) memcpy(rgb, buf.data(), n);
+    } catch (const exception& ex) {
+        fprintf(stderr, "error: %s\n", ex.what());
+        if (n) memset(rgb, 0, n);
+    } catch (...) {
+        fprintf(stderr, "error: unknown exception\n");
+        if (n) memset(rgb, 0, n);
     }
-    // Older / minimal scenes may omit whole sections; normalise once so every
-    // downstream .at() is safe.
-    if (!meta.contains("fx")) meta["fx"] = json{{"enabled", false}};
-    if (!meta.contains("bloom")) meta["bloom"] = json{{"enabled", false}};
-    if (!meta.contains("dof")) meta["dof"] = json{{"enabled", false}};
-    if (!meta.contains("backgrounds")) meta["backgrounds"] = json::array();
-    if (!meta.contains("camera"))
-        meta["camera"] = json{{"fov", 0.8726646f}, {"near", 0.01f}, {"far", 500.0f}};
-    World world(scene, meta);
-    TRACE = getenv("CPP_TRACE") != nullptr;
-    if (!audio_env_path.empty()) {
-        json ej = json::parse(read_file(audio_env_path));
-        world.env.fps = ej.value("fps", 60.0f);
-        for (const auto& row : ej.at("data")) world.env.data.push_back(row.get<vector<float>>());
-        world.has_env = true;
-    }
+}
 
-    // fonts
-    FontEngine fe;
-    bool font_ok = false;
-    for (const auto& f : meta.value("font_fallback", json::array())) {
-        if (fe.open(f.get<string>())) {
-            font_ok = true;
-            break;
-        }
-    }
-    if (!font_ok) {
-        fprintf(stderr, "no usable font\n");
-        return 1;
-    }
-
-    float duration = meta.at("total_frames").get<float>() / meta.at("fps").get<float>();
-    (void)duration;
-    world.prepare({});
-    // cues/outro/first-lyric are computed in prepare() — they need env-independent
-    // info only, fine.
-
-    for (const auto& spec : scene.at("texts")) {
-        PreparedText tx;
-        tx.position = Vec3{spec.at("position")[0].get<float>(),
-                           spec.at("position")[1].get<float>(),
-                           spec.at("position")[2].get<float>()};
-        tx.size = spec.at("size").get<float>();
-        tx.alpha = spec.value("alpha", 1.0f);
-        tx.anims = &spec.at("animations");
-        tx.char_times = spec.contains("char_times") ? &spec.at("char_times") : nullptr;
-        {
-            // Fade anims define the block's visible span: first char becomes
-            // visible at ~min(start_at), all fade out by max(fade_out_at +
-            // fade_out). A ±5s margin absorbs char_times/stagger edges. If any
-            // fade lacks fade_out_at the block stays visible indefinitely, so
-            // the upper bound is left open. Conservative: worst case we
-            // evaluate a block whose chars are all transparent — never the
-            // reverse.
-            bool has_fade = false, all_bounded = true;
-            float lo = INFINITY, hi = -INFINITY;
-            for (const auto& a : spec.at("animations")) {
-                if (a.value("type", "") != "fade") continue;
-                has_fade = true;
-                lo = min(lo, a.value("start_at", 0.0f));
-                auto fo_it = a.find("fade_out_at");
-                if (fo_it != a.end() && fo_it->is_number())
-                    hi = max(hi, fo_it->get<float>() + a.value("fade_out", 0.45f));
-                else
-                    all_bounded = false;
-            }
-            if (has_fade) {
-                tx.vis_from = lo - 5.0f;
-                if (all_bounded) tx.vis_to = hi + 5.0f;
-            }
-        }
-        tx.neon = true;
-        auto& mat = spec.at("material");
-        hex_linear(mat.at("color").get<string>(), tx.color_lin);
-        tx.strength = mat.value("strength", 1.0f);
-        for (int k = 0; k < 3; k++) tx.color_lin[k] *= tx.strength;
-        tx.has_outline = mat.contains("outline");
-        if (tx.has_outline) {
-            hex_linear(mat.at("outline").at("color").get<string>(), tx.outline_lin);
-            tx.outline_strength = mat.at("outline").value("strength", 1.0f);
-            for (int k = 0; k < 3; k++) tx.outline_lin[k] *= tx.outline_strength;
-        }
-        // layout (port of src/text/layout.rs)
-        const string& text = spec.at("text").get<string>();
-        float cursor = 0, max_asc = -1e30f, min_desc = 1e30f;
-        struct Item {
-            uint32_t cp;
-            int glyph;
-            float advance_em, center_x;
-        };
-        vector<Item> items;
-        for (size_t i = 0; i < text.size();) {
-            size_t nx;
-            uint32_t cp = fe.codepoint(text, i, nx);
-            i = nx;
-            int glyph = fe.find_glyph(cp);
-            float adv, lsb;
-            fe.h_metrics(glyph, adv, lsb);
-            max_asc = max(max_asc, fe.ascender);
-            min_desc = min(min_desc, fe.descender);
-            items.push_back({cp, glyph, adv, cursor + adv * 0.5f});
-            cursor += adv;
-        }
-        float total_width = cursor;
-        float line_center_y = (max_asc + min_desc) * 0.5f;
-        float half = total_width * 0.5f;
-        // fit_width (port of export::build)
-        float size = tx.size;
-        if (spec.contains("fit_width")) {
-            float budget = spec.at("fit_width").get<float>();
-            float w = total_width * size;
-            if (w > budget && budget > 0 && w > 0) size *= budget / w;
-        }
-        tx.size = size;
-        tx.total_width_em = total_width;
-        float depth = spec.value("depth", 0.09f);
-        const json* cts = tx.char_times;
-        for (size_t gi = 0; gi < items.size(); gi++) {
-            auto& it = items[gi];
-            float cx_local = it.center_x - half;
-            float cy_local = -line_center_y;
-            bool empty = it.glyph == 0 || fe.glyph_empty(it.glyph);
-            PreparedChar ch;
-            ch.idx = gi;
-            ch.lands_at = 0;
-            for (const auto& a : spec.at("animations")) {
-                if (a.value("type", "") == "fade") {
-                    float sa = a.value("start_at", 0.0f), stg = a.value("stagger", 0.04f);
-                    if (cts && gi < cts->size() && (*cts)[gi].is_number())
-                        ch.lands_at = (*cts)[gi].get<float>();
-                    else ch.lands_at = sa + (float)gi * stg;
-                }
-            }
-            if (empty) {
-                // no mesh, but the char still occupies the index stream
-                tx.chars.push_back(move(ch));
-                continue;
-            }
-            if (TRACE) {
-                fprintf(stderr, "[trace] mesh glyph=%d\n", it.glyph);
-                fflush(stderr);
-            }
-            float org_x = 0, org_y = 0;
-            if (!build_glyph_mesh(fe, it.glyph, depth, ch.mesh, org_x, org_y)) {
-                tx.chars.push_back(move(ch));
-                continue;
-            }
-            // base_position: position + R*((center - adv/2 + origin) * size)
-            Vec3 local{(cx_local - it.advance_em * 0.5f + org_x) * size,
-                       (cy_local + org_y) * size, 0};
-            ch.base_position = tx.position + local;
-            if (tx.has_outline) {
-                float ow = mat_outline_width(spec);
-                ch.hull = smooth_hull(ch.mesh, ow);
-            }
-            tx.chars.push_back(move(ch));
-        }
-        tx.hw = clamp(tx.total_width_em * tx.size * 0.5f, 1.0f, 9.0f);
-        world.texts.push_back(move(tx));
-    }
-    // sparks need hw — rebuild after texts
-    {
-        uint32_t r = 0;
-        for (size_t bi = 0; bi < world.texts.size(); bi++) {
-            auto& tx = world.texts[bi];
-            float cue = INFINITY;
-            for (const auto& a : tx.anims->items()) {
-                const json& aj = a.value();
-                if (aj.value("type", "") == "fade") cue = aj.value("start_at", 0.0f);
-            }
-            if (!isfinite(cue)) continue;
-            r = (uint32_t)(bi * 131 + 7);
-            for (int k = 0; k < 14; k++) {
-                Sparks::P sp;
-                sp.pos = tx.position +
-                         Vec3{(mulberry_f(r) * 2 - 1) * tx.hw * 1.05f,
-                              (mulberry_f(r) * 2 - 1) * 0.85f, (mulberry_f(r) - 0.5f) * 0.6f};
-                sp.cue = cue + mulberry_f(r) * 0.15f;
-                for (int c = 0; c < 3; c++) sp.color[c] = tx.color_lin[c];
-                sp.s0 = (float)M_PI * (0.15f + 0.7f * mulberry_f(r));
-                sp.s1 = 0.5f + mulberry_f(r) * 1.6f;
-                sp.s2 = 2.0f + mulberry_f(r) * 4.0f;
-                world.sparks.p.push_back(sp);
-            }
-        }
-    }
-
-    int w = meta.at("width").get<int>(), h = meta.at("height").get<int>();
-    unsigned fps = meta.at("fps").get<unsigned>();
-    unsigned total = meta.at("total_frames").get<unsigned>();
-    unsigned count = frames ? frames : total - from;
-    count = min(count, total - from);
-
-    if (still >= 0) {
-        Frame fr;
-        world.render_frame_into(still, fr);
-        auto& fx = meta.at("fx");
-        float flash = 0;
-        if (fx.value("enabled", false)) {
-            float bands[64], bass, energy;
-            world.env.sample(still, bands, bass, energy);
-            float hit = hit_envelope(world.cues, still, fx.value("hit_duration", 0.35f));
-            flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
-        }
+int engine_still_png(Engine* e, float t, const char* png_path) {
+    if (!e) return 1;
+    string png = png_path ? png_path : "";
+    try {
         static vector<uint8_t> rgb;
-        finish(fr, meta, flash, rgb);
+        engine_render_frame(e, t, rgb);
         // stbi_write_png opens through the ANSI codepage and fails on Chinese
         // paths; rasterize to memory and write through a wide path instead.
         vector<uint8_t> png_bytes;
@@ -4563,7 +4657,7 @@ static int render_main(int argc, char** argv) {
             const uint8_t* d = (const uint8_t*)data;
             buf.insert(buf.end(), d, d + size);
         };
-        if (!stbi_write_png_to_func(png_sink, &png_bytes, w, h, 3, rgb.data(), w * 3)) {
+        if (!stbi_write_png_to_func(png_sink, &png_bytes, e->w, e->h, 3, rgb.data(), e->w * 3)) {
             fprintf(stderr, "[cpp] ERROR: cannot encode %s\n", png.c_str());
             return 1;
         }
@@ -4574,59 +4668,127 @@ static int render_main(int argc, char** argv) {
                 return 1;
             }
         }
-        printf("still t=%g -> %s\n", still, png.c_str());
         return 0;
-    }
-
-    VideoPipe vpipe;
-    if (!vpipe.start(w, h, fps, out)) {
-        fprintf(stderr, "cannot start ffmpeg\n");
+    } catch (const exception& ex) {
+        fprintf(stderr, "error: %s\n", ex.what());
+        return 1;
+    } catch (...) {
+        fprintf(stderr, "error: unknown exception\n");
         return 1;
     }
-    auto t0 = chrono::steady_clock::now();
-    double prof_render = 0, prof_finish = 0;
-    bool prof = getenv("CPP_PROF") != nullptr;
-    for (unsigned i = 0; i < count; i++) {
-        float t = (from + i) / (float)fps;
-        auto tr = chrono::steady_clock::now();
-        static Frame fr;
-        world.render_frame_into(t, fr);
-        auto tf = chrono::steady_clock::now();
-        auto& fx = meta.at("fx");
-        float flash = 0;
-        if (fx.value("enabled", false)) {
-            float bands[64], bass, energy;
-            world.env.sample(t, bands, bass, energy);
-            float hit = hit_envelope(world.cues, t, fx.value("hit_duration", 0.35f));
-            flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
-        }
-        static vector<uint8_t> rgb;
-        finish(fr, meta, flash, rgb);
-        prof_render += chrono::duration<double>(tf - tr).count();
-        prof_finish += chrono::duration<double>(chrono::steady_clock::now() - tf).count();
-        if (!vpipe.write(rgb.data(), rgb.size())) {
-            // A dead ffmpeg turns the pipe into a silent sink — surface it
-            // instead of "done"-ing over a missing file.
-            fprintf(stderr, "[cpp] ERROR: ffmpeg pipe broke at frame %u\n", i + 1);
-            vpipe.finish();
+}
+
+int engine_encode_video(Engine* e, unsigned from, unsigned frames, const char* out_path) {
+    if (!e) return 1;
+    string out = out_path && *out_path ? out_path : "cpp_out.mp4";
+    try {
+        int w = e->w, h = e->h;
+        unsigned fps = e->fps, total = e->total;
+        unsigned count = frames ? frames : total - from;
+        count = min(count, total - from);
+
+        VideoPipe vpipe;
+        if (!vpipe.start(w, h, fps, out)) {
+            fprintf(stderr, "cannot start ffmpeg\n");
             return 1;
         }
-        if ((i + 1) % 60 == 0 || i + 1 == count) {
-            double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-            fprintf(stderr, "[cpp] frame %u/%u  %.2f fps  elapsed %.1fs  eta %.0fs\n",
-                    i + 1, count, (i + 1) / el, el, el / (i + 1) * (count - i - 1));
+        auto t0 = chrono::steady_clock::now();
+        double prof_render = 0, prof_finish = 0;
+        bool prof = getenv("CPP_PROF") != nullptr;
+        for (unsigned i = 0; i < count; i++) {
+            float t = (from + i) / (float)fps;
+            auto tr = chrono::steady_clock::now();
+            static Frame fr;
+            e->world.render_frame_into(t, fr);
+            auto tf = chrono::steady_clock::now();
+            auto& fx = e->meta.at("fx");
+            float flash = 0;
+            if (fx.value("enabled", false)) {
+                float bands[64], bass, energy;
+                e->world.env.sample(t, bands, bass, energy);
+                float hit = hit_envelope(e->world.cues, t, fx.value("hit_duration", 0.35f));
+                flash = fx.value("flash", 0.0f) * hit * (0.45f + 0.55f * energy);
+            }
+            static vector<uint8_t> rgb;
+            finish(fr, e->meta, flash, rgb);
+            prof_render += chrono::duration<double>(tf - tr).count();
+            prof_finish += chrono::duration<double>(chrono::steady_clock::now() - tf).count();
+            if (!vpipe.write(rgb.data(), rgb.size())) {
+                // A dead ffmpeg turns the pipe into a silent sink — surface it
+                // instead of "done"-ing over a missing file.
+                fprintf(stderr, "[cpp] ERROR: ffmpeg pipe broke at frame %u\n", i + 1);
+                vpipe.finish();
+                return 1;
+            }
+            if ((i + 1) % 60 == 0 || i + 1 == count) {
+                double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+                fprintf(stderr, "[cpp] frame %u/%u  %.2f fps  elapsed %.1fs  eta %.0fs\n",
+                        i + 1, count, (i + 1) / el, el, el / (i + 1) * (count - i - 1));
+            }
         }
-    }
-    int rc = vpipe.finish();
-    double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-    if (rc != 0) {
-        fprintf(stderr, "[cpp] ERROR: ffmpeg exited %d — output may be missing or bad\n", rc);
+        int rc = vpipe.finish();
+        double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+        if (rc != 0) {
+            fprintf(stderr, "[cpp] ERROR: ffmpeg exited %d — output may be missing or bad\n", rc);
+            return 1;
+        }
+        fprintf(stderr, "[cpp] done -> %s  %u frames  %.2f fps\n",
+                out.c_str(), count, count / el);
+        if (prof)
+            fprintf(stderr, "[prof] render %.1fms/f  finish %.1fms/f\n",
+                    prof_render / count * 1000, prof_finish / count * 1000);
+        return 0;
+    } catch (const exception& ex) {
+        fprintf(stderr, "error: %s\n", ex.what());
+        return 1;
+    } catch (...) {
+        fprintf(stderr, "error: unknown exception\n");
         return 1;
     }
-    fprintf(stderr, "[cpp] done -> %s  %u frames  %.2f fps\n", out.c_str(), count,
-            count / el);
-    if (prof)
-        fprintf(stderr, "[prof] render %.1fms/f  finish %.1fms/f\n",
-                prof_render / count * 1000, prof_finish / count * 1000);
-    return 0;
 }
+
+int engine_width(const Engine* e) { return e ? e->w : 0; }
+int engine_height(const Engine* e) { return e ? e->h : 0; }
+unsigned engine_fps(const Engine* e) { return e ? e->fps : 0; }
+unsigned engine_total_frames(const Engine* e) { return e ? e->total : 0; }
+
+void set_trace(bool on) { TRACE = on; }
+
+bool read_file(const char* path, std::string& out) {
+    try {
+        out = ::read_file(path ? path : "");
+        return true;
+    } catch (...) {
+        out.clear();
+        return false;
+    }
+}
+
+char** argv_utf8(int argc, char** argv, int* out_argc) {
+#ifdef _WIN32
+    // One decode per program; a second call would invalidate the first
+    // result (the storage is reassigned). Callers keep it for the program's
+    // lifetime.
+    static vector<string> hold;
+    static vector<char*> ptrs;
+    hold = ::utf8_argv(argc, argv);
+    ptrs.clear();
+    for (auto& s : hold) ptrs.push_back(&s[0]);
+    ptrs.push_back(nullptr);
+    if (out_argc) *out_argc = (int)hold.size();
+    return ptrs.data();
+#else
+    if (out_argc) *out_argc = argc;
+    return argv;
+#endif
+}
+
+// CLI-shaped content tools — the exe is a thin wrapper around these.
+int gen_main(int argc, char** argv) { return ::gen_main(argc, argv); }
+int audio_main(int argc, char** argv) { return ::audio_main(argc, argv); }
+
+} // namespace chamina
+
+#endif // CHAMINA_IMPLEMENTATION
+
+#endif // CHAMINA_H_INCLUDE

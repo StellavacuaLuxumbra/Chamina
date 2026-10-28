@@ -376,3 +376,78 @@ terminate（0xC0000409）。gen 端 26 例首轮即全清。修复后 **48/48 �
 
 **遗留 fuzz 面**（未做，供后续）：随机字节 LRC 语料长跑、场景 JSON 的
 自动化深度突变；char_times 元素混型的运行期守卫已加（is_number）。
+
+
+## 十三、单头库化 `chamina.h`（2026-10-28，stb 风格交付形态落地）
+
+**决策**：最终交付形态从「单 TU 的 exe」升级为「单头库 + 薄壳 CLI」。
+`cpp/src/chamina.h`（~4800 行，stb 风格）= 引擎全部；`chamina_cli.cpp`
+（~120 行）= 旧 main + 参数解析，include 头文件后编译出同一个
+`dist/chamina-cpp.exe`。渲染公式零改动。
+
+**头文件结构**（生成器 `tmp/split.cjs` 从 chamina.cpp 拼装，可重跑）：
+1. banner/用法文档 + include 守卫（`CHAMINA_H_INCLUDE`）；
+2. `namespace chamina` 公共 API 声明（仅 `<cstddef>/<cstdint>/<string>`）；
+3. `#ifdef CHAMINA_IMPLEMENTATION` → 引擎体 = 原 chamina.cpp 第 16–4177 行
+   **逐字**迁移（vendored includes、TRACE、全部引擎节、gen/audio 实现、
+   VideoPipe、utf8_argv）；
+4. 公共 API 实现（原 main/render_main 的迁移，见下）；
+5. 两个 `#endif`（IMPLEMENTATION / include 守卫）。
+vendored 依赖（json.hpp/earcut.hpp/stb_truetype.h/stb_image_write.h）经
+`-Icpp/vendor` 解析；完全自包含 amalgamation（依赖内联进头文件）是 Phase 2。
+
+**公共 API**（`namespace chamina`）：
+- `struct Engine` 不透明；实现里持有 `scene`/`meta` 拷贝（`PreparedText::
+  anims/char_times` 指针的宿主，与原 render_main 局部 scene 的存活期规则
+  一致）+ `World`（World 构造函数本来就按值拷贝 scene/meta，结构相同）+
+  `FontEngine` + w/h/fps/total；
+- `engine_create(scene_json, audio_env_json, err, err_cap)`：吸收
+  render_main 的装配段（场景解析 → 兼容归一化逐字 → meta 归一化 →
+  env 注入 → 字体回退链 → prepare → texts mesh 循环 → sparks）。差异仅三
+  处：场景/包络改为解析**传入的 UTF-8 字符串**（文件读取上移到 CLI 层）、
+  字体失败改为填 err 缓冲（原为 fprintf+return 1）、整体 try/catch 不抛
+  异常（错误语义与原 main 的 catch 兜底一致：`error: <what>` exit 1）；
+- `engine_render_rgb(e, t, rgb)`：RGB24 直出（宿主喂自家纹理），异常时
+  清零 + stderr，从不抛出；
+- `engine_still_png(e, t, png_path)`：原 still 分支逐字（stbi_write_png_
+  to_func + 宽路径写出）但**不再打印** `still t=… -> …`（上移到 CLI，
+  stdout 行为不变）；
+- `engine_encode_video(e, from, frames, out_path)`：原 video 分支逐字内联
+  （`count = frames ? frames : total - from` 的 unsigned 下溢语义、逐段
+  CPP_PROF 计时位置、管道断裂检测、`[cpp] frame i/count` 进度全保留）；
+  渲染+finish 不抽 helper——helper（`engine_render_frame`）只用于
+  render_rgb/still_png 这两条无计时路径，避免扭曲 CPP_PROF 的分段语义；
+- `engine_width/height/fps/total_frames`、`set_trace`、`read_file`、
+  `argv_utf8`（存 static，二次调用会失效——程序期调用一次）、
+  `gen_main`/`audio_main`（转发全局 ::gen_main/::audio_main，argv[0]=
+  子命令 token）。
+
+**悬垂指针关键点**：mesh 循环原来迭代局部 `scene` 并把
+`tx.anims = &spec.at("animations")` 指进它——库化后 render_main 一旦返回
+局部 scene 即消亡。engine_create 必须**迭代 `e->scene`**（Engine 自己的
+拷贝）装配，指针随 Engine 存活。 World 内部用的是自己的拷贝
+（`World(const json&, const json&)` 按值拷贝），行为不变。
+
+**回归（全部绿，新旧二进制逐字节 A/B）**：
+- 静帧 t=8/20.35/325：old/new MD5 全等（C6F14C81/1D356417/FF6222E9）；
+  stdout 行 `still t=8 -> …` 逐字一致；region-cmp 与记录值精确吻合
+  （t=8 1.005/1.014/1.030/1.020，t=20.35 full 1.026）；
+- gen bird/sample：与 node 字节级一致；
+- audio：与 node 字节级一致（22068 帧 7,703,325 字节，`鸟之诗.mp3`）；
+- 60 帧视频段（--from 100 --frames 60）：old/new exit 0 且 mp4 **字节
+  相等**（925,553 字节）；
+- fuzz 48/48 重跑全清；
+- 错误分支：缺文件（`error: cannot read …`）/ 坏 --still（`error: stof`）/
+  无参数 usage / gen 无输入 / audio too short 全保留；
+- 嵌入验证：`cpp/example/main.cpp`（自身定义 IMPLEMENTATION）独立编译
+  运行，出 PNG 与 CLI 静帧**逐字节相等**；仅声明 TU（另一 TU 只 include
+  不定义 IMPLEMENTATION）单独编译通过——stb 双 TU 用法成立。
+
+**构建**：`cpp/build.bat` 改为编译 `chamina_cli.cpp`（`-Icpp/vendor`
+不变）。嵌入示例编译：`g++ … -Icpp/vendor -Icpp/src cpp/example/main.cpp
+-o dist/chamina-example.exe -lshell32`。
+
+**文件变动**：`cpp/src/chamina.cpp` 删除（引擎体 16–4177 行进 chamina.h，
+git 按相似度记 rename）；新增 `chamina.h` / `chamina_cli.cpp` /
+`example/main.cpp`；拆分源料 `tmp/split.cjs` + `tmp/chamina_head.txt` +
+`tmp/chamina_api.inc`（不入库）。

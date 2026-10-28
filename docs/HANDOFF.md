@@ -80,6 +80,40 @@ gen LRC 边界 26），harness 判定 exit∈{0,1}=清，其余=崩。
   复核逐位不变。
 - 细节与例表见 `docs/cpp-migration.md` §十二。
 
+## 0d. ✅ 单头库化：`chamina.h`（stb 风格）+ 薄壳 CLI（2026-10-28）
+
+最终交付形态落地：**`cpp/src/chamina.h` 单头库**（~4800 行，stb 风格）。
+宿主 C++ 工程在一个 `.cpp` 里 `#define CHAMINA_IMPLEMENTATION` 后 include
+即可渲染；`cpp/src/chamina_cli.cpp`（~120 行薄壳）= 旧 `chamina.cpp` 的
+main+参数解析，编译出同一个 `dist/chamina-cpp.exe`。
+
+- **头文件结构**：banner/用法文档 → include 守卫（`CHAMINA_H_INCLUDE`）→
+  `namespace chamina` 公共 API 声明 → `#ifdef CHAMINA_IMPLEMENTATION` →
+  引擎体（原 chamina.cpp 第 16–4177 行**逐字**迁移）→ 公共 API 实现 → 两个
+  `#endif`。vendored 依赖经 `-Icpp/vendor` 解析（完全自包含 amalgamation
+  是 Phase 2）。
+- **公共 API**（`namespace chamina`）：`Engine`（不透明；持有 scene/meta
+  拷贝 + World + FontEngine + w/h/fps/total）、`engine_create(scene_json,
+  audio_env_json, err, err_cap)`（不抛异常，失败填 err 返回 nullptr）、
+  `engine_render_rgb`（RGB24 直出，异常时清零+stderr）、
+  `engine_still_png`、`engine_encode_video`（frames=0 到片尾；CPP_PROF
+  语义保留）、`engine_width/height/fps/total_frames`、`set_trace`、
+  `read_file`、`argv_utf8`、`gen_main`/`audio_main`（CLI 形参入口）。
+- **悬垂指针关键点**：`PreparedText::anims/char_times` 指向场景 JSON——
+  engine_create 必须用 `e->scene`（Engine 自己的拷贝）迭代装配，绝不能
+  引用函数局部 scene。
+- **回归（全部绿）**：静帧 t=8/20.35/325 新旧二进制**逐字节相等**，且
+  t=8 门禁 1.005/1.014/1.030/1.020、t=20.35 full 1.026 与记录值精确吻合；
+  gen bird/sample 与 node 字节级一致；audio 与 node 字节级一致（7,703,325
+  字节）；60 帧视频段新旧 mp4 字节相等（925,553）；fuzz 48/48；错误分支
+  （缺文件/坏 --still/无参数 usage/gen 无输入/audio too short）全保留。
+- **嵌入验证**：`cpp/example/main.cpp`（自身定义 IMPLEMENTATION）独立编译
+  运行成功，输出 PNG 与 CLI 静帧**逐字节相等**；仅声明 TU（不含
+  IMPLEMENTATION）单独编译通过——stb 双 TU 用法成立。
+- 生成器 `tmp/split.cjs`（读 chamina.cpp 切引擎体 + 拼头尾，可重跑），
+  `tmp/chamina_head.txt`（banner+API 声明）、`tmp/chamina_api.inc`（API 实现）
+  是拆分源料；细节见 `docs/cpp-migration.md` §十三。
+
 ## 1. 使命与现状
 
 用户目标：**整个项目彻底 C++ 化（字体/排版/动画/渲染全重写）= 交付软件
@@ -89,7 +123,8 @@ gen LRC 边界 26），harness 判定 exit∈{0,1}=清，其余=崩。
 → 同一画面）：
 1. JS + 浏览器（`js/scene.js`，作者预览，Edge 156 已无法 headless 启动）
 2. Rust 软件光栅（`src/native`，chamina-native.exe，参考实现）
-3. **C++（`cpp/`，chamina-cpp.exe，主交付，~5.9 fps）**
+3. **C++ 单头库（`cpp/src/chamina.h`，chamina-cpp.exe 为其 CLI 薄壳，
+   ~5.9 fps，主交付）**
 
 此外 `chamina-cpp gen` 已接管 lrc2scene、`chamina-cpp audio` 已接管
 audio-env（见 §0a/§0b）；Node 仅剩 editor，以及 gen 第二阶段的
@@ -213,14 +248,19 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 ```
 cpp/
 ├─ build.bat           一键构建 + 冒烟（需 -lshell32，见 §5）
-├─ README.md           用法/开关/架构速览
-├─ src/chamina.cpp     全引擎（~3900 行单 TU；含 gen 节 ~950 行；各节注释标明公式来源）
+├─ README.md           用法（库 + CLI）/开关/架构速览
+├─ src/chamina.h       单头库交付物（~4800 行 stb 风格；引擎体逐字来自
+│                      原 chamina.cpp 第 16–4177 行 + 公共 API 实现）
+├─ src/chamina_cli.cpp CLI 薄壳（~120 行：UTF-8 argv 解码 + 参数解析 + 调库）
+├─ example/main.cpp    最小嵌入示例（自身定义 IMPLEMENTATION，出静帧）
 └─ vendor/             nlohmann/json.hpp, stb_truetype.h, earcut.hpp, stb_image_write.h
-dist/chamina-cpp.exe   交付产物（静态，4.7MB；gen/audio/渲染三合一）
+dist/chamina-cpp.exe   交付产物（静态；CLI 薄壳 + 库，gen/audio/渲染三合一）
+dist/chamina-example.exe 嵌入示例产物
+tmp/split.cjs          chamina.h 生成器（+ tmp/chamina_head.txt、tmp/chamina_api.inc）
 src/native/            Rust 参考实现（对照验收用）
 js/                    作者工具链——lrc2scene、audio-env 已 C++ 化（gen/audio
                        子命令）；未 C++ 化：editor、layout.mjs（gen --layout field）
-docs/cpp-migration.md  全部决策与实施记录（§一~§十一）
+docs/cpp-migration.md  全部决策与实施记录（§一~§十三）
 docs/session-summary.md §十二~§十四（v10 特效、Rust/C++ 落地）
 scenes/bird.json       主测试场景（30fps/11010 帧/314 相机 stop/34 背景键）
 scenes/bird.lrc        gen 的真实语料（与 node 版字节级一致）
@@ -242,10 +282,13 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
      ffmpeg 解码 + 手写同构 FFT，输出字节级一致，零新 vendored 库）；
    - editor（Web GUI）——低优先级。
 4. ~~崩溃/边界 fuzz 第一轮~~（**已完成**，2026-10-28，48 例全清，见 §0c 与
-   cpp-migration §十二）。**下一个：gen 第二阶段**——`--layout field` /
-   `--groups auto`（读 js/layout.mjs 741 行的 layoutField + PHRASE_CUTS/
-   WORD_SPLIT_SPECS/groupCharTimes；测试向量在 js/layout.test.mjs /
-   js/lrc.test.mjs）。可选自动化长跑：随机字节 LRC 语料。
+   cpp-migration §十二）。
+   ~~单头库化 chamina.h~~（**已完成**，2026-10-28，见 §0d 与 cpp-migration
+   §十三）。Phase 2 可选：完全自包含 amalgamation（vendored 依赖内联进
+   chamina.h，生成脚本检查入仓）。**下一个：gen 第二阶段**——
+   `--layout field` / `--groups auto`（读 js/layout.mjs 741 行的 layoutField +
+   PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes；测试向量在
+   js/layout.test.mjs / js/lrc.test.mjs）。可选自动化长跑：随机字节 LRC 语料。
 5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十二 与本文件。
 
 ## 8. 用户偏好（长期有效）
