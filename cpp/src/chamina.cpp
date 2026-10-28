@@ -3770,10 +3770,387 @@ static string find_ffmpeg() {
         return p;
     };
     if (const char* p = getenv("CHAMINA_FFMPEG")) return norm(p);
-    for (auto rel : {"js/node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe"})
+    // The bundled installer copy wins; look for it relative to the exe too so
+    // dist\chamina-cpp.exe keeps working from any cwd (node resolves the same
+    // package through module resolution, independent of cwd).
+    for (auto rel : {"js/node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe"}) {
         if (filesystem::exists(rel)) return norm(rel);
+#ifdef _WIN32
+        wchar_t exedir[MAX_PATH + 1] = {};
+        GetModuleFileNameW(nullptr, exedir, MAX_PATH);
+        error_code ec;
+        filesystem::path cand =
+            filesystem::path(exedir).parent_path() / ".." / filesystem::u8path(rel);
+        if (filesystem::exists(cand, ec))
+            return norm(cand.lexically_normal().u8string());
+#endif
+    }
     return "ffmpeg";
 }
+
+// ---------------------------------------------------------------------------
+// audio: offline spectral envelope (port of node js/audio-env.mjs)
+//
+//   chamina-cpp audio <audio.(mp3|wav|m4a|...)> [-o out.json] [--fps 60]
+//                     [--bands 64] [--lo 40] [--hi 14000]
+//
+// Output: {"fps":..,"bands":..,"frames":..,"lo":..,"hi":..,"data":[[..]]} in
+// compact JSON.stringify form — exactly what the renderer's --audio-env
+// reads. Decoding shells out to ffmpeg with the same argument set as the JS
+// tool; the analysis reproduces the JS Float32Array rounding chain (f32
+// storage, double arithmetic) so the JSON matches node byte for byte.
+// ---------------------------------------------------------------------------
+
+// ffmpeg decode → mono f32le @ rate, stdout read back as raw PCM. The 'b'
+// matters on the popen fallback: without it CRT text mode mangles 0x0A bytes
+// inside floats. ffmpeg's stderr passes through to ours; node captured it
+// for its error text, we surface just the exit code.
+static wstring utf8_wide(const string& s) {
+#ifdef _WIN32
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    wstring w(n > 0 ? (size_t)n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+    return w;
+#else
+    (void)s;
+    return wstring();
+#endif
+}
+
+static vector<float> decode_audio(const string& input, unsigned rate) {
+    string bytes;
+#ifdef _WIN32
+    // popen() runs the command through cmd with an ANSI(=ACP) command line:
+    // with ACP 936 the UTF-8 input path fails conversion outright and _popen
+    // returns NULL. Spawn ffmpeg directly with UTF-16 arguments and an
+    // anonymous pipe for the PCM stream instead — correct on any codepage.
+    SECURITY_ATTRIBUTES sa{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 1 << 20)) throw runtime_error("cannot create pipe");
+    // The child inherits every inheritable handle, pipe ends included; our
+    // read end must not leak in or EOF tracking breaks.
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             &sa, OPEN_EXISTING, 0, nullptr);
+    HANDLE err_dup = nullptr;
+    DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE),
+                    GetCurrentProcess(), &err_dup, 0, TRUE, DUPLICATE_SAME_ACCESS);
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = nul;        // JS decodes with stdio 'ignore'
+    si.hStdOutput = wr;
+    si.hStdError = err_dup ? err_dup : GetStdHandle(STD_ERROR_HANDLE);
+    wstring cmd = L"\"" + utf8_wide(find_ffmpeg()) +
+                  L"\" -hide_banner -loglevel error -i \"" + utf8_wide(input) +
+                  L"\" -f f32le -acodec pcm_f32le -ac 1 -ar " + to_wstring(rate) +
+                  L" pipe:1";
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                             nullptr, &si, &pi);
+    if (nul) CloseHandle(nul);
+    if (err_dup) CloseHandle(err_dup);
+    CloseHandle(wr);  // our copy must go or ReadFile never sees EOF
+    if (!ok) {
+        CloseHandle(rd);
+        throw runtime_error("cannot start ffmpeg");
+    }
+    char buf[1 << 16];
+    DWORD got = 0;
+    while (ReadFile(rd, buf, sizeof buf, &got, nullptr) && got > 0) bytes.append(buf, got);
+    CloseHandle(rd);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (code != 0) throw runtime_error("ffmpeg exited " + to_string(code));
+#else
+    string cmd = "\"\"" + find_ffmpeg() + "\" -hide_banner -loglevel error -i \""
+                 + input + "\" -f f32le -acodec pcm_f32le -ac 1 -ar "
+                 + to_string(rate) + " pipe:1\"";
+    FILE* pipe = popen(cmd.c_str(), "rb");
+    if (!pipe) throw runtime_error("cannot start ffmpeg");
+    vector<char> buf(1 << 16);
+    size_t n;
+    while ((n = fread(buf.data(), 1, buf.size(), pipe)) > 0) bytes.append(buf.data(), n);
+    int rc = pclose(pipe);
+    if (rc != 0) throw runtime_error("ffmpeg exited " + to_string(rc));
+#endif
+    bytes.resize(bytes.size() - bytes.size() % 4);  // JS: buf.length >> 2 drops the tail
+    vector<float> samples(bytes.size() / 4);
+    for (size_t i = 0; i < samples.size(); i++) memcpy(&samples[i], &bytes[i * 4], 4);
+    return samples;
+}
+
+// In-place iterative radix-2 FFT over re/im of length 2^n. Direct port of the
+// JS FFT in js/audio-env.mjs — re/im are Float32Array there, so every
+// butterfly store rounds to f32 while the twiddle products stay double; keep
+// exactly that mix to reproduce node's bit patterns.
+static void fft_env(float* re, float* im, size_t n) {
+    for (size_t i = 1, j = 0; i < n; i++) {
+        size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+            swap(re[i], re[j]);
+            swap(im[i], im[j]);
+        }
+    }
+    for (size_t len = 2; len <= n; len <<= 1) {
+        double ang = (-2.0 * M_PI) / (double)len;
+        double wr = cos(ang), wi = sin(ang);
+        size_t half = len >> 1;
+        for (size_t i = 0; i < n; i += len) {
+            double cr = 1.0, ci = 0.0;
+            for (size_t k = 0; k < half; k++) {
+                size_t a = i + k, l = a + half;
+                double tr = (double)re[l] * cr - (double)im[l] * ci;
+                double ti = (double)re[l] * ci + (double)im[l] * cr;
+                re[l] = (float)((double)re[a] - tr);
+                im[l] = (float)((double)im[a] - ti);
+                re[a] = (float)((double)re[a] + tr);
+                im[a] = (float)((double)im[a] + ti);
+                double nr = cr * wr - ci * wi;
+                ci = cr * wi + ci * wr;
+                cr = nr;
+            }
+        }
+    }
+}
+
+static int audio_main(int argc, char** argv) {
+    const char* usage =
+        "audio-env\n"
+        "chamina-cpp audio <audio-file> [-o out.json] [--fps 60] [--bands 64]\n"
+        "                  [--lo 40] [--hi 14000]\n";
+    string input, out;
+    double fps = 60, bands = 64, lo = 40, hi = 14000;
+    try {
+        auto next = [&](int& i) -> string {
+            i++;
+            if (i >= argc) throw runtime_error(string(argv[i - 1]) + " needs a value");
+            return argv[i];
+        };
+        for (int i = 1; i < argc; i++) {
+            string a = argv[i];
+            if (a == "-o") out = next(i);
+            else if (a == "--fps") fps = parse_num(next(i));
+            else if (a == "--bands") bands = parse_num(next(i));
+            else if (a == "--lo") lo = parse_num(next(i));
+            else if (a == "--hi") hi = parse_num(next(i));
+            else if (a == "-h" || a == "--help") {
+                fputs(usage, stdout);
+                return 0;
+            } else if (!a.empty() && a[0] == '-')
+                throw runtime_error("unknown flag " + a);
+            else input = a;  // JS overwrites; the last positional wins
+        }
+        if (input.empty()) {
+            fputs(usage, stdout);  // JS: console.log(USAGE) then exit 1
+            return 1;
+        }
+
+        const unsigned RATE = 44100;
+        vector<float> samples = decode_audio(input, RATE);
+
+        const double hop = (double)RATE / fps;  // samples per frame
+        const size_t N = 2048;
+        // JS: frames = Math.max(0, Math.floor((samples.length - N) / hop)).
+        // A NaN hop would slip past JS's `if (!frames)` guard and emit a
+        // garbage file — we fail instead (error path only).
+        double frames_d = floor(((double)samples.size() - (double)N) / hop);
+        if (!(frames_d >= 1.0))
+            throw runtime_error("audio too short (" + to_string(samples.size()) +
+                                " samples)");
+        long long frames = (long long)frames_d;
+
+        // Log-spaced band edges across [lo, hi].
+        size_t B = (size_t)bands;  // fractional bands crash node (RangeError); we truncate
+        vector<long long> edges;
+        for (size_t b = 0; b <= B; b++)
+            edges.push_back(
+                (long long)js_round(lo * pow(hi / lo, (double)b / (double)B)));
+        double binHz = (double)RATE / (double)N;
+        vector<double> bandBin;  // kept double: NaN here must poison the row to nulls
+        for (size_t b = 0; b <= B; b++)
+            bandBin.push_back(
+                js_min((double)(N >> 1), js_max(1.0, js_round((double)edges[b] / binHz))));
+
+        // Hann window, precomputed (Float32Array in JS → f32 rounding).
+        vector<float> win(N);
+        for (size_t i = 0; i < N; i++)
+            win[i] = (float)(0.5 - 0.5 * cos((2.0 * M_PI * (double)i) / (double)(N - 1)));
+
+        string body;
+        body.reserve((size_t)frames * (2 + B * 8) + 64);
+        body += "{\"fps\":";
+        js_dtoa(fps, body);
+        body += ",\"bands\":";
+        js_dtoa(bands, body);
+        body += ",\"frames\":";
+        body += to_string(frames);  // Math.floor()'d → integer double
+        body += ",\"lo\":";
+        js_dtoa(lo, body);
+        body += ",\"hi\":";
+        js_dtoa(hi, body);
+        body += ",\"data\":[";
+
+        vector<float> re(N), im(N);
+        const double DB_LO = -60;  // dB window floor
+        for (long long f = 0; f < frames; f++) {
+            long long off = (long long)js_round((double)f * hop);
+            for (size_t i = 0; i < N; i++) {
+                // JS reads past the end only in degenerate configs, where
+                // undefined→NaN poisons the row to nulls; mirror that.
+                double s = (size_t)off + i < samples.size()
+                               ? (double)samples[(size_t)off + i] * (double)win[i]
+                               : numeric_limits<double>::quiet_NaN();
+                re[i] = (float)s;
+                im[i] = 0.0f;
+            }
+            fft_env(re.data(), im.data(), N);
+            body += f ? ",[" : "[";
+            for (size_t b = 0; b < B; b++) {
+                double v;
+                double blo = bandBin[b], bhi = js_max(blo + 1.0, bandBin[b + 1]);
+                if (isfinite(blo) && isfinite(bhi)) {
+                    double sum = 0;
+                    for (long long k = (long long)blo; k < (long long)bhi; k++)
+                        sum += (double)re[k] * (double)re[k] + (double)im[k] * (double)im[k];
+                    // Divide by N/2 (Hann coherent gain) so a full-scale sine
+                    // peaks at 0 dB; without this every band of a loud master
+                    // saturates the -60..0 window.
+                    double mag = sqrt(sum / (bhi - blo)) / ((double)N / 2);
+                    double db = 20.0 * log10(mag + 1e-9);
+                    v = js_max(0.0, js_min(1.0, (db - DB_LO) / -DB_LO));
+                } else {
+                    v = numeric_limits<double>::quiet_NaN();
+                }
+                if (b) body += ',';
+                js_dtoa(round3(v), body);
+            }
+            body += ']';
+        }
+        body += "]}";
+
+        string out_path = out.empty() ? "target/chamina/audio_env.json" : out;
+        {
+            error_code ec;
+            filesystem::path op = filesystem::u8path(out_path);
+            if (op.has_parent_path()) filesystem::create_directories(op.parent_path(), ec);
+            ofstream f(op, ios::binary);
+            if (!f) throw runtime_error("cannot write " + out_path);
+            f.write(body.data(), (streamsize)body.size());
+            f.close();
+            if (!f) throw runtime_error("cannot write " + out_path);
+        }
+
+        printf("audio-env: %s  frames=%lld bands=%zu %sfps\n", out_path.c_str(), frames,
+               B, js_num_str(fps).c_str());
+        return 0;
+    } catch (const exception& e) {
+        fprintf(stderr, "%s\n", e.what());
+        return 1;
+    }
+}
+
+// ffmpeg child fed raw RGB frames on stdin. Windows: direct CreateProcessW
+// with UTF-16 arguments — popen's ANSI(=ACP) command line breaks non-ASCII
+// -o paths (and dies outright when ACP can't decode the UTF-8 bytes); stdout
+// is discarded and stderr passes through. Elsewhere: popen with cmd's
+// quoting workaround.
+struct VideoPipe {
+#ifdef _WIN32
+    HANDLE wr = nullptr, proc = nullptr, thread = nullptr;
+    bool start(unsigned w, unsigned h, unsigned fps, const string& out) {
+        SECURITY_ATTRIBUTES sa{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+        HANDLE rd = nullptr;
+        if (!CreatePipe(&rd, &wr, &sa, 1 << 20)) return false;
+        // Same inheritance trap: our write end must not leak into the child,
+        // or it never sees EOF and waits forever after the last frame.
+        SetHandleInformation(wr, HANDLE_FLAG_INHERIT, 0);
+        HANDLE nul = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &sa,
+                                 OPEN_EXISTING, 0, nullptr);
+        HANDLE err_dup = nullptr;
+        DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE),
+                        GetCurrentProcess(), &err_dup, 0, TRUE, DUPLICATE_SAME_ACCESS);
+        STARTUPINFOW si{};
+        si.cb = sizeof si;
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = rd;
+        si.hStdOutput = nul;
+        si.hStdError = err_dup ? err_dup : GetStdHandle(STD_ERROR_HANDLE);
+        wstring cmd = L"\"" + utf8_wide(find_ffmpeg()) +
+                      L"\" -y -hide_banner -loglevel error -f rawvideo -pix_fmt rgb24 -s " +
+                      to_wstring(w) + L"x" + to_wstring(h) + L" -framerate " +
+                      to_wstring(fps) + L" -i pipe:0 -c:v libx264 -preset medium "
+                      L"-crf 18 -pix_fmt yuv420p -vf scale=trunc(iw/2)*2:trunc(ih/2)*2 "
+                      L"-movflags +faststart \"" + utf8_wide(out) + L"\"";
+        PROCESS_INFORMATION pi{};
+        BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                                 nullptr, &si, &pi);
+        if (nul) CloseHandle(nul);
+        if (err_dup) CloseHandle(err_dup);
+        CloseHandle(rd);
+        if (!ok) {
+            CloseHandle(wr);
+            wr = nullptr;
+            return false;
+        }
+        proc = pi.hProcess;
+        thread = pi.hThread;
+        return true;
+    }
+    bool write(const void* p, size_t n) {
+        const uint8_t* q = (const uint8_t*)p;
+        while (n) {
+            DWORD w = 0;
+            size_t chunk = n < (size_t)1 << 20 ? n : (size_t)1 << 20;
+            if (!WriteFile(wr, q, (DWORD)chunk, &w, nullptr) || w == 0) return false;
+            q += w;
+            n -= w;
+        }
+        return true;
+    }
+    int finish() {
+        if (wr) CloseHandle(wr);  // EOF so ffmpeg can finalise the container
+        wr = nullptr;
+        if (!proc) return -1;
+        WaitForSingleObject(proc, INFINITE);
+        DWORD code = 0;
+        GetExitCodeProcess(proc, &code);
+        CloseHandle(proc);
+        CloseHandle(thread);
+        proc = thread = nullptr;
+        return (int)code;
+    }
+#else
+    FILE* f = nullptr;
+    bool start(unsigned w, unsigned h, unsigned fps, const string& out) {
+        // popen shells out through `cmd /c`, which eats the leading quote when
+        // a line holds several — wrapping the whole command in one extra quote
+        // pair keeps every inner quote intact.
+        string cmd = "\"\"" + find_ffmpeg() + "\" -y -hide_banner -loglevel error -f rawvideo "
+                     "-pix_fmt rgb24 -s " + to_string(w) + "x" + to_string(h) +
+                     " -framerate " + to_string(fps) + " -i pipe:0 -c:v libx264 -preset medium "
+                     "-crf 18 -pix_fmt yuv420p -vf scale=trunc(iw/2)*2:trunc(ih/2)*2 "
+                     "-movflags +faststart \"" + out + "\"\"";
+        f = popen(cmd.c_str(), "wb");
+        return f != nullptr;
+    }
+    bool write(const void* p, size_t n) {
+        fwrite(p, 1, n, f);
+        return !ferror(f);
+    }
+    int finish() {
+        if (!f) return -1;
+        int rc = pclose(f);
+        f = nullptr;
+        return rc;
+    }
+#endif
+};
 
 #ifdef _WIN32
 static vector<string> utf8_argv(int argc, char** argv) {
@@ -3815,6 +4192,8 @@ int main(int argc, char** argv) {
 #endif
     if (argc >= 2 && string(argv[1]) == "gen")
         return gen_main(argc - 1, argv + 1);
+    if (argc >= 2 && string(argv[1]) == "audio")
+        return audio_main(argc - 1, argv + 1);
     string input, audio_env_path, out = "cpp_out.mp4", png;
     float still = -1;
     unsigned from = 0, frames = 0;
@@ -3832,7 +4211,8 @@ int main(int argc, char** argv) {
     if (input.empty()) {
         fprintf(stderr, "usage: chamina-cpp <scene.json> [--audio-env f] -o out.mp4 "
                         "[--from n] [--frames n] [--still t --png f]\n"
-                        "       chamina-cpp gen <song.lrc> -o scene.json [--help]\n");
+                        "       chamina-cpp gen <song.lrc> -o scene.json [--help]\n"
+                        "       chamina-cpp audio <audio-file> -o audio_env.json\n");
         return 1;
     }
     // scene/audio-env read through read_file: MinGW's ifstream(char*) opens
@@ -4072,16 +4452,8 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // popen shells out through `cmd /c`, which eats the leading quote when a
-    // line holds several — wrapping the whole command in one extra quote pair
-    // keeps every inner quote intact (verified against cmd's parsing rules).
-    string cmd = "\"\"" + find_ffmpeg() + "\" -y -hide_banner -loglevel error -f rawvideo "
-                 "-pix_fmt rgb24 -s " + to_string(w) + "x" + to_string(h) +
-                 " -framerate " + to_string(fps) + " -i pipe:0 -c:v libx264 -preset medium "
-                 "-crf 18 -pix_fmt yuv420p -vf scale=trunc(iw/2)*2:trunc(ih/2)*2 "
-                 "-movflags +faststart \"" + out + "\"\"";
-    FILE* pipe = popen(cmd.c_str(), "wb");
-    if (!pipe) {
+    VideoPipe vpipe;
+    if (!vpipe.start(w, h, fps, out)) {
         fprintf(stderr, "cannot start ffmpeg\n");
         return 1;
     }
@@ -4106,12 +4478,11 @@ int main(int argc, char** argv) {
         finish(fr, meta, flash, rgb);
         prof_render += chrono::duration<double>(tf - tr).count();
         prof_finish += chrono::duration<double>(chrono::steady_clock::now() - tf).count();
-        fwrite(rgb.data(), 1, rgb.size(), pipe);
-        // A dead ffmpeg turns the pipe into a silent sink — surface it instead
-        // of "done"-ing over a missing file.
-        if (ferror(pipe)) {
+        if (!vpipe.write(rgb.data(), rgb.size())) {
+            // A dead ffmpeg turns the pipe into a silent sink — surface it
+            // instead of "done"-ing over a missing file.
             fprintf(stderr, "[cpp] ERROR: ffmpeg pipe broke at frame %u\n", i + 1);
-            pclose(pipe);
+            vpipe.finish();
             return 1;
         }
         if ((i + 1) % 60 == 0 || i + 1 == count) {
@@ -4120,7 +4491,7 @@ int main(int argc, char** argv) {
                     i + 1, count, (i + 1) / el, el, el / (i + 1) * (count - i - 1));
         }
     }
-    int rc = pclose(pipe);
+    int rc = vpipe.finish();
     double el = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
     if (rc != 0) {
         fprintf(stderr, "[cpp] ERROR: ffmpeg exited %d — output may be missing or bad\n", rc);

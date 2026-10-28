@@ -293,3 +293,49 @@ yaw-drift=0、radius）全部与 node 输出字节级一致；真实语料
 - `Math.tan`/strtod 与 V8 可能差 1 ulp（影响 fit_width 最末位小数）；
 - `localeCompare` 平局退化为码点序；
 - strtod 接受 `"inf"` 而 JS `Number("inf")` 为 NaN（LRC 数值解析边界）。
+
+
+## 十一、`audio-env` → `chamina-cpp audio` 移植（2026-10-28，字节级对齐完成）
+
+**决策**：放弃早先设想的 miniaudio+pocketFFT——权威源 `js/audio-env.mjs`
+（154 行）实际是 ffmpeg 子进程解码 + 手写 radix-2 FFT，C++ 同构复刻即可
+字节级一致；渲染器本就依赖 ffmpeg（find_ffmpeg 已有），零新 vendored 库。
+
+**对齐方法**（关键在复刻 Float32Array 舍入链）：
+- 解码：ffmpeg 同参数集（`-f f32le -acodec pcm_f32le -ac 1 -ar 44100
+  pipe:1`），尾部不足 4 字节丢弃（对应 `buf.length >> 2`）；
+- 分析：N=2048、hop=rate/fps、off=round(f·hop)；Hann 窗按 **f32 存储**；
+  radix-2 原位迭代 FFT——**float 数组 + double 运算**：蝶形每次存回舍入
+  到 f32（相对误差 ~6e-8），cr/ci/wr/wi 全 double（libm 1 ulp 差 ~1e-13
+  被完全淹没）；频带累加 `sum += re²+im²`（单乘 exact、每步一舍入）→
+  `mag=sqrt(sum/(hi-lo))/1024` → `db=20·log10(mag+1e-9)` →
+  `clamp((db+60)/60)` → round3（Math.round=floor(x+0.5)）→ 三位小数；
+  读越界样本按 undefined→NaN 复刻（NaN 行序列化为 "null"）；
+- 序列化：手写紧凑 JSON（键序 fps/bands/frames/lo/hi/data；js_dtoa 出数；
+  NaN/Inf→"null"；单行无缩进）。
+
+**验证**：`鸟之诗.mp3`（5.9MB，22068 帧）默认参数 + 3 组 flag
+（`--fps 30 --bands 32`、`--bands 16 --lo 30 --hi 16000`、
+`--fps 24 --bands 96 --lo 20 --hi 20000`）全部与 node 版**字节级一致**
+（0 差异）；错误分支（audio too short/坏文件/未知 flag/--help）与
+node 行为一致；中文输入路径实测通过。分析耗时 ~4.7s（node 版分钟级）。
+
+**Windows 坑×2（均修，渲染端连带受益）**：
+1. popen → CreateProcessW：popen 的命令行走 ANSI(=ACP 936)，UTF-8 中文
+   路径转换失败时 _popen 直接返回 NULL——**渲染端视频管道同样中招**
+   （HANDOFF 旧「中文输出路径实测正常」不成立，实证为直接起不来）。
+   `VideoPipe`（渲染端）/`decode_audio`（音频端）都改为 CreateProcessW
+   直起 ffmpeg（UTF-16 命令行 + 匿名管道；stdout 丢 NUL，stderr 透传，
+   管道断裂检测保留：stub ffmpeg 下 frame 1 即报错 exit 1）；
+2. 句柄继承陷阱：CreateProcessW(bInheritHandles=TRUE) 会复制**所有**可
+   继承句柄——管道两端都被子进程带走，我方 close 后 EOF 仍不到，症状是
+   最后帧之后永久挂起。`SetHandleInformation(HANDLE_FLAG_INHERIT, 0)`
+   把我方持有的端设为不可继承（两端各自设置）。
+
+**find_ffmpeg**：安装版路径补 exe 相对解析兜底（`dist\chamina-cpp.exe`
+从任意 cwd 可用；此前只认 cwd 相对路径）。
+
+**错误路径偏差（诊断文本，非输出）**：ffmpeg 失败时 node 把 stderr 尾部
+拼进错误消息，C++ 端透传到自身 stderr + 报 exit code——信息不丢失，文本
+不逐字一致；NaN hop 在 node 会静默产出垃圾文件，C++ 端按 audio too short
+报错（仅错误路径差异，合法输入输出不受影响）。

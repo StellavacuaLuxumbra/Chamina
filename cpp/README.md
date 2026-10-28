@@ -1,11 +1,11 @@
 # chamina-cpp — 独立 C++ 渲染引擎
 
 整个 Chamina 的 C++ 实现：**字体解析、排版、挤出网格、动画求值、相机编排、
-软件光栅、全套音频可视化、后处理、视频编码管道，以及 LRC → 场景 JSON 生成
-（`gen` 子命令）**，一个约 3900 行的翻译单元（`src/chamina.cpp`）+
-四个 vendored 单头库。不依赖 Rust、不依赖 Node、不依赖浏览器、不依赖 GPU
-——同一份场景 JSON，与旧管线逐位等价（验收比值 0.97–1.03，
-详见 `docs/cpp-migration.md` §八）。
+软件光栅、全套音频可视化、后处理、视频编码管道，以及 LRC → 场景 JSON
+（`gen`）与音轨 → 频谱包络（`audio`）两个子命令**，一个约 3900 行的翻译
+单元（`src/chamina.cpp`）+ 四个 vendored 单头库。不依赖 Rust、不依赖
+Node、不依赖浏览器、不依赖 GPU——同一份场景 JSON，与旧管线逐位等价
+（验收比值 0.97–1.03，详见 `docs/cpp-migration.md` §八）。
 
 ## 构建
 
@@ -25,6 +25,10 @@ chamina-cpp gen scenes\bird.lrc -o scenes\bird.json ^
   --entrance fall --jitter 0.4 --title "标题" --palette "0xff88cc,#66ddff"
 :: 不支持的：--layout field、--groups auto（提示改用 node js/lrc2scene.mjs）
 
+:: 音轨 → 频谱包络（audio-env 的 C++ 移植，输出与 node 版字节级一致）
+chamina-cpp audio gift.mp3 -o target\chamina\audio_env.json
+chamina-cpp audio gift.mp3 --fps 30 --bands 32 --lo 30 --hi 16000
+
 :: 渲一段视频（rawvideo 管道 → x264，需要 ffmpeg 在 CHAMINA_FFMPEG 或 PATH）
 chamina-cpp scenes\bird.json --audio-env target\chamina\audio_env.json -o out.mp4
 chamina-cpp scenes\bird.json -o out.mp4 --from 0 --frames 300
@@ -39,7 +43,7 @@ chamina-cpp scenes\bird.json --still 20.35 --png frame.png
 
 gen 支持与 node 版相同的 CLI（entrance/jitter/wave/shake/palette/fx/
 标题副题片尾卡/相机运动/fit-width/offset/duration/fps/tail 等，详见
-`--help`）；已知偏差与未支持项见 `docs/cpp-migration.md` §十。
+`--help`）；已知偏差与未支持项见 `docs/cpp-migration.md` §十/§十一。
 
 ### 运行时开关（环境变量）
 
@@ -64,7 +68,8 @@ chamina.cpp
 ├─ 可视化            彩虹频谱环×2 / 3D 频谱条 / 落词火花 / 甩镜风线
 ├─ 后处理            bloom（UnrealBloom 同构）→ DOF → ACES+sRGB → grade
 ├─ gen               LRC 解析（js/lrc.js 直译）→ 场景 JSON（与 node 版字节级一致）
-└─ 管道              ffmpeg rawvideo rgb24 → libx264；静帧走 stb_image_write
+├─ audio             ffmpeg 解码 + radix-2 FFT → 频谱包络 JSON（字节级一致）
+└─ 管道              ffmpeg rawvideo rgb24 → libx264（CreateProcessW 直起）；静帧走 stb_image_write
 ```
 
 ## 三条等价通路（互为回归对照）

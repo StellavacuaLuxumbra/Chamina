@@ -43,6 +43,30 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
 - **gen 渲染回归**：argv UTF-8 重解码 + u8path + PNG to_func 改动后，
   新旧二进制同刻 A/B t=8 与 t=20.35 全区比值 1.000；20 帧视频段管道正常。
 
+## 0b. ✅ audio-env 已移植为 `chamina-cpp audio`（2026-10-28）
+
+**Node 的音频分析依赖也甩掉了**：`chamina-cpp audio <audio> -o audio_env.json`
+（--fps/--bands/--lo/--hi 同 node 版），输出与 `node js/audio-env.mjs`
+**字节级一致**（默认参数 22068 帧 / 64 频带 / 7,703,325 字节 + 3 组 flag 组合
+全部 0 差异）。
+
+- **实现决策**：不走早先设想的 miniaudio+pocketFFT——JS 版实际是 ffmpeg
+  子进程解码 + 手写 radix-2 FFT，C++ 端同构复刻即字节级一致，渲染器本就
+  依赖 ffmpeg，零新 vendored 库。关键是复刻 JS 的 Float32Array 舍入链：
+  **float 存储、double 运算**——蝶形每次存回舍入到 f32、twiddle 累乘保持
+  double；libm 1 ulp 差(~1e-13)被 f32 舍入(6e-8)完全淹没，实测无差异。
+- **Windows 坑×2（均已修，渲染端连带受益）**：
+  1. popen 的命令行走 ANSI(=ACP 936，本机实测)，UTF-8 路径转换失败 →
+     _popen 直接返回 NULL。**渲染端视频管道同样中招**——HANDOFF 旧说
+     「中文输出路径实测正常」不成立。两处都改为 CreateProcessW 直起
+     ffmpeg（UTF-16 参数 + 匿名管道，stdout 丢 NUL、stderr 透传）；
+  2. 句柄继承陷阱：bInheritHandles=TRUE 时子进程复制**所有**可继承句柄，
+     管道两端都被带走 → EOF 永不到达（症状：最后帧后挂死）。必须
+     SetHandleInformation 把我方持有的端设为不可继承。
+- **错误分支**：audio too short / 坏文件 / 未知 flag / --help 均复刻 node
+  行为；管道断裂（stub ffmpeg）在 frame 1 响亮报错 exit 1，不假 done。
+- find_ffmpeg 顺带补 exe 相对路径解析（dist\chamina-cpp.exe 任意 cwd 可用）。
+
 ## 1. 使命与现状
 
 用户目标：**整个项目彻底 C++ 化（字体/排版/动画/渲染全重写）= 交付软件
@@ -54,8 +78,9 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
 2. Rust 软件光栅（`src/native`，chamina-native.exe，参考实现）
 3. **C++（`cpp/`，chamina-cpp.exe，主交付，~5.9 fps）**
 
-此外 `chamina-cpp gen` 已接管 lrc2scene（LRC → 场景 JSON，见 §0a）；
-Node 仅剩 audio-env 与 editor 未 C++ 化。
+此外 `chamina-cpp gen` 已接管 lrc2scene、`chamina-cpp audio` 已接管
+audio-env（见 §0a/§0b）；Node 仅剩 editor，以及 gen 第二阶段的
+`--layout field`（js/layout.mjs）。
 
 ## 2. 构建与验收（每次改动的标准流程）
 
@@ -155,9 +180,16 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
      `filesystem::u8path(path)`（构造 fstream）；
   3. stb_image_write 的窄路径 fopen 同理——静帧 PNG 已改
      `stbi_write_png_to_func` + 宽路径写文件。
-- **仍存的编码限制**：ffmpeg 走 popen→cmd /c，输出文件名是中文时会损毁
-  （cmd 的非 ASCII 处理）——出片文件名避免中文；gen 的 JSON 写出已走
-  u8path 无此问题。
+- ~~ffmpeg popen 的中文路径问题~~：**已修**——popen 命令行走 ANSI(=ACP)，
+  本机 ACP 936 对 UTF-8 路径直接转换失败（_popen 返回 NULL，连损毁文件都
+  不会留）。decode_audio 与渲染端 VideoPipe 均改为 CreateProcessW 直起
+  （UTF-16 参数 + 匿名管道）。**句柄继承陷阱**：子进程复制所有可继承句柄，
+  管道两端都泄露会让 EOF 永不到达（收尾挂死）——我方持有的端必须
+  SetHandleInformation(HANDLE_FLAG_INHERIT, 0)。
+- ACP=936（GBK），不是 UTF-8——旧文「本机 UTF-8 代码页」不成立。真实
+  cmd/PowerShell 用户敲中文参数走 CreateProcessW 正常；harness 里敲中文
+  参数会双重损坏，测试请用 node spawnSync 的 UTF-16 参数通道（见
+  tmp/audio/ab.mjs 的做法，tmp/ 不入库）。
 - git 看得见 `nul.png` 幽灵文件而常规 API 看不见（NTFS 保留名）——用
   `cmd /c del "\\.\F:\项目\Chamina\nul.png"` 删（本次已处理）。
 
@@ -169,11 +201,11 @@ cpp/
 ├─ README.md           用法/开关/架构速览
 ├─ src/chamina.cpp     全引擎（~3900 行单 TU；含 gen 节 ~950 行；各节注释标明公式来源）
 └─ vendor/             nlohmann/json.hpp, stb_truetype.h, earcut.hpp, stb_image_write.h
-dist/chamina-cpp.exe   交付产物（静态，4.7MB；gen 渲染二合一）
+dist/chamina-cpp.exe   交付产物（静态，4.7MB；gen/audio/渲染三合一）
 src/native/            Rust 参考实现（对照验收用）
-js/                    作者工具链——lrc2scene 已 C++ 化（gen 子命令）；未 C++ 化：
-                       audio-env、editor、layout.mjs（gen --layout field）
-docs/cpp-migration.md  全部决策与实施记录（§一~§十）
+js/                    作者工具链——lrc2scene、audio-env 已 C++ 化（gen/audio
+                       子命令）；未 C++ 化：editor、layout.mjs（gen --layout field）
+docs/cpp-migration.md  全部决策与实施记录（§一~§十一）
 docs/session-summary.md §十二~§十四（v10 特效、Rust/C++ 落地）
 scenes/bird.json       主测试场景（30fps/11010 帧/314 相机 stop/34 背景键）
 scenes/bird.lrc        gen 的真实语料（与 node 版字节级一致）
@@ -191,12 +223,11 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
      `--layout field` / `--groups auto`（需读 js/layout.mjs 741 行 +
      PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes；测试向量在
      js/layout.test.mjs / js/lrc.test.mjs）；
-   - **下一个：`audio-env` → `chamina-cpp audio`**（读 js/audio-env.mjs
-     理解谱包络生成；解码用 miniaudio、FFT 用 pocketFFT，输出
-     audio_env.json 兼容 `--audio-env`）；
+   - ~~`audio-env` → `chamina-cpp audio`~~（**已完成**，2026-10-28，见 §0b：
+     ffmpeg 解码 + 手写同构 FFT，输出字节级一致，零新 vendored 库）；
    - editor（Web GUI）——低优先级。
-4. 崩溃/边界 fuzz：gen 的 LRC 解析器是首选 fuzz 对象（空文件/截断时钟/
-   超长行/非法 UTF-8）；渲染端老项——空 texts、无 camera_animation、
+4. **下一个：崩溃/边界 fuzz**：gen 的 LRC 解析器是首选对象（空文件/截断
+   时钟/超长行/非法 UTF-8）；渲染端老项——空 texts、无 camera_animation、
    单字场景、depth=0.001、fit_width=0——都应不崩（老场景兼容模式已开路）。
 5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十 与本文件。
 
