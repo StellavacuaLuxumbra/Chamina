@@ -2058,8 +2058,9 @@ static float mat_outline_width(const json& spec) {
 // Covers the single-layout default path: LRC parsing (incl. {e:...} line tags
 // and <mm:ss.xx> word-timed stamps), entrance/fade/jitter/wave text blocks,
 // title & outro cards, orbit retune, camera move/shake, background looks and
-// cuts, the fx rack and the colour palette. --layout field / --groups auto
-// (js/layout.mjs) are not ported yet and are rejected up front.
+// cuts, the fx rack and the colour palette. Also ported: --layout field /
+// --groups auto (js/layout.mjs — serpentine world positions, per-cue camera
+// stops, per-line exits, word-group choreography and audio-energy whips).
 //
 // Output aims at byte parity with node's JSON.stringify(scene, null, 2):
 // numbers print through js_dtoa (ECMAScript Number→String rules), keys keep
@@ -2737,8 +2738,1050 @@ static ojson build_wave(const ojson* wave, int i, double t) {
 }
 
 // ---------------------------------------------------------------------------
-// gen: lyric text blocks (buildLyricTexts, single layout)
+// gen: word grouping (port of js/lrc.js wordGroups / groupCharTimes) — the
+// `--groups auto` path. A group always breaks at a space (the space rides
+// with the word before it) and each phrase between spaces is cut by a rhythm
+// picked from the line/phrase index; the fixed lyric corpus is hand-worded
+// instead of guessed.
 // ---------------------------------------------------------------------------
+
+static const double SPACE_EM = 0.2959;  // advance of a space in the layout font
+
+// Advance of a line in em, mirroring `text::layout` in Rust. Everything that
+// is neither CJK nor a space is counted a whole em — an overestimate only
+// ever makes the frame budget more conservative. (The CJK branch adds 1 too,
+// so only the space is special.)
+static double em_width(const string& text) {
+    double em = 0;
+    for (size_t i = 0; i < text.size();) {
+        size_t l;
+        uint32_t cp = utf8_cp(text, i, l);
+        i += l;
+        em += cp == ' ' ? SPACE_EM : 1.0;
+    }
+    return em;
+}
+
+// js/lrc.js thirds / chunks — the two helpers PHRASE_CUTS composes with.
+static vector<int> thirds_cut(int n) {
+    int a = (int)js_round(n / 3.0);
+    int b = (int)js_round((n - a) / 2.0);
+    return {a, b, n - a - b};
+}
+static vector<int> chunks_cut(int n, int k) {
+    vector<int> out;
+    int left = n;
+    for (int i = k; i > 0; i--) {
+        int take = (int)js_max(1.0, js_round(left / (double)i));
+        out.push_back((int)js_min((double)take, (double)(left - (i - 1))));
+        left -= out.back();
+    }
+    vector<int> nz;
+    for (int x : out)
+        if (x > 0) nz.push_back(x);
+    return nz;
+}
+
+// phrase cut table (js/lrc.js PHRASE_CUTS — fifteen rhythms, index = kind)
+typedef vector<int> (*CutFn)(int);
+static vector<int> cut_all(int n) { return {n}; }
+static vector<int> cut_1_rest(int n) { return n >= 2 ? vector<int>{1, n - 1} : vector<int>{n}; }
+static vector<int> cut_2_rest(int n) { return n >= 3 ? vector<int>{2, n - 2} : vector<int>{n}; }
+static vector<int> cut_11_rest(int n) { return n >= 4 ? vector<int>{1, 1, n - 2} : vector<int>{n}; }
+static vector<int> cut_rest_1(int n) { return n >= 2 ? vector<int>{n - 1, 1} : vector<int>{n}; }
+static vector<int> cut_half(int n) {
+    // Math.ceil(n/2), Math.floor(n/2)
+    return n >= 2 ? vector<int>{(n + 1) / 2, n / 2} : vector<int>{n};
+}
+static vector<int> cut_thirds(int n) { return n >= 3 ? thirds_cut(n) : vector<int>{n}; }
+static vector<int> cut_1_rest_1(int n) { return n >= 4 ? vector<int>{1, n - 2, 1} : vector<int>{n}; }
+static vector<int> cut_chunks2(int n) { return chunks_cut(n, 2); }
+static vector<int> cut_chunks3(int n) { return chunks_cut(n, 3); }
+static vector<int> cut_12_rest(int n) { return n >= 5 ? vector<int>{1, 2, n - 3} : vector<int>{n}; }
+static vector<int> cut_rest_21(int n) { return n >= 5 ? vector<int>{n - 3, 2, 1} : vector<int>{n}; }
+static vector<int> cut_22_rest(int n) { return n >= 6 ? vector<int>{2, 2, n - 4} : vector<int>{n}; }
+static vector<int> cut_31_rest(int n) { return n >= 6 ? vector<int>{3, 1, n - 4} : vector<int>{n}; }
+static vector<int> cut_1_mid_rest(int n) {
+    if (n >= 3) {
+        int mid = (n - 1 + 1) / 2;  // Math.ceil((n-1)/2)
+        return {1, mid, n - 1 - mid};
+    }
+    return {n};
+}
+static const CutFn PHRASE_CUTS[] = {
+    cut_all,     cut_1_rest,  cut_2_rest,   cut_11_rest, cut_rest_1,
+    cut_half,    cut_thirds,  cut_1_rest_1, cut_chunks2, cut_chunks3,
+    cut_12_rest, cut_rest_21, cut_22_rest,  cut_31_rest, cut_1_mid_rest,
+};
+static const int PHRASE_CUT_COUNT = (int)(sizeof PHRASE_CUTS / sizeof PHRASE_CUTS[0]);
+
+// Hand-worded segmentation for the fixed lyric corpus (js/lrc.js
+// WORD_SPLIT_SPECS): line text → '|'-separated words, the trailing space of a
+// gap riding with the word before it so the pieces tile the whole string.
+struct SplitSpec {
+    const char* text;
+    const char* spec;
+};
+static const SplitSpec WORD_SPLIT_SPECS[] = {
+    {"远离那些繁华悲伤 我们从此告别了过往", "远离|那些|繁华|悲伤 |我们|从此|告别了|过往"},
+    {"飞鸟张开时光翅膀 经历了无数风雨阻挡", "飞鸟|张开|时光|翅膀 |经历了|无数|风雨|阻挡"},
+    {"来到她身旁 谁的目光 停留在那个梦里的夜晚",
+     "来到|她|身旁 |谁的|目光 |停留|在|那个|梦里|的|夜晚"},
+    {"我们追随风的方向 遥远飞行地老天荒 别彷徨",
+     "我们|追随|风的|方向 |遥远|飞行|地老天荒 |别|彷徨"},
+    {"在初遇的那地方 我们曾眷恋不已 梦想", "在|初遇|的|那地方 |我们|曾|眷恋|不已 |梦想"},
+    {"面对迷惘 也不要放弃了希望", "面对|迷惘 |也|不要|放弃了|希望"},
+    {"就像是盛开的花 对阳光不变的那信仰", "就像是|盛开|的|花 |对|阳光|不变的|那|信仰"},
+    {"天空里早已留下了 永恒的神话", "天空里|早已|留下了 |永恒的|神话"},
+    {"在夏天的操场 静静地眺望 在远方", "在|夏天|的|操场 |静静地|眺望 |在|远方"},
+    {"连绵不断 是回忆之间的海洋", "连绵|不断 |是|回忆|之间|的|海洋"},
+    {"穿过云端 是谁的天堂 在召唤", "穿过|云端 |是|谁的|天堂 |在|召唤"},
+    {"她在寻访 那沉睡千年的答案", "她|在|寻访 |那|沉睡|千年|的|答案"},
+    {"在告别的那地方 我们都无法放下的伤感",
+     "在|告别|的|那地方 |我们|都|无法|放下|的|伤感"},
+    {"挥一挥手留下的是美丽愿望", "挥一挥手|留下的|是|美丽|愿望"},
+    {"就像是逆风的帆 对海浪不屈的那坚强", "就像是|逆风|的|帆 |对|海浪|不屈|的|那|坚强"},
+    {"秋天的夜晚 静静地回想 在远方", "秋天|的|夜晚 |静静地|回想 |在|远方"},
+    {"挥去不散 我们怀念着的故乡", "挥去|不散 |我们|怀念着|的|故乡"},
+    {"在我们身旁", "在|我们|身旁"},
+    {"她的目光 飞翔在每个梦里的夜晚", "她的|目光 |飞翔|在|每个|梦里|的|夜晚"},
+    {"我们追随风的方向 遥远飞行地久天长 不返航",
+     "我们|追随|风的|方向 |遥远|飞行|地久天长 |不|返航"},
+};
+// PHRASE_CUT_OVERRIDES（js/lrc.js）—— `lineIndex:phraseIndex` → 表项：第 0 行
+// 的两个短语由手写节拍替代公式节拍，在 word_groups 内联生效（0:0 → 表[3]，
+// 0:1 → 表[12]）。
+
+struct WordGroup {
+    int i0, i1;   // half-open codepoint range
+    double t;     // the time the whole group lands on (its first glyph's stamp)
+    int kind;     // phrase-cut index (fallback groups carry -1)
+};
+
+static vector<WordGroup> word_groups(const string& text, const vector<double>& char_times,
+                                     int seed) {
+    if (char_times.empty()) return {};
+    // one byte offset per codepoint (spaces break phrases at codepoint level)
+    vector<size_t> off;
+    for (size_t i = 0; i < text.size();) {
+        size_t l;
+        utf8_cp(text, i, l);
+        off.push_back(i);
+        i += l;
+    }
+    size_t n = min(off.size(), char_times.size());
+    if (n == 0) return {};
+    vector<WordGroup> out;
+    for (const auto& sp : WORD_SPLIT_SPECS) {
+        if (text != sp.text) continue;
+        const string specs = sp.spec;
+        size_t i = 0, pos = 0;
+        while (true) {
+            size_t bar = specs.find('|', pos);
+            string piece = specs.substr(pos, bar == string::npos ? string::npos : bar - pos);
+            if (i < n) {
+                size_t len = 0;
+                for (size_t j = 0; j < piece.size();) {
+                    size_t l;
+                    utf8_cp(piece, j, l);
+                    j += l;
+                    len++;
+                }
+                size_t end = min(i + len, n);
+                out.push_back({(int)i, (int)end, char_times[i], seed % PHRASE_CUT_COUNT});
+                i = end;
+            }
+            if (bar == string::npos) break;
+            pos = bar + 1;
+        }
+        // A corpus line that grew past its table entry keeps the remainder on
+        // the last group rather than dropping glyphs on the floor.
+        if (i < n) out.push_back({(int)i, (int)n, char_times[i], seed % PHRASE_CUT_COUNT});
+        return out;
+    }
+    size_t phrase_start = 0;
+    int phrase_index = 0;
+    auto flush = [&](size_t phrase_end) {
+        size_t len = phrase_end - phrase_start;
+        if (len == 0) return;
+        int kind = (seed * 5 + phrase_index * 3) % PHRASE_CUT_COUNT;
+        // PHRASE_CUT_OVERRIDES — "0:0" → PHRASE_CUTS[3], "0:1" → PHRASE_CUTS[12]
+        CutFn cut = PHRASE_CUTS[kind];
+        if (seed == 0 && phrase_index == 0) cut = PHRASE_CUTS[3];
+        else if (seed == 0 && phrase_index == 1) cut = PHRASE_CUTS[12];
+        size_t i = phrase_start;
+        for (int piece : cut((int)len)) {
+            if (piece <= 0) continue;
+            out.push_back({(int)i, (int)(i + piece), char_times[i], kind});
+            i += piece;
+        }
+        phrase_index += 1;
+    };
+    // Cut *after* the space, so the gap rides with the word it follows and
+    // the groups tile the whole line with no holes.
+    for (size_t i = 0; i < n; i++) {
+        size_t l;
+        uint32_t cp = utf8_cp(text, off[i], l);
+        if (cp == ' ') {
+            flush(i + 1);
+            phrase_start = i + 1;
+        }
+    }
+    flush(n);
+    return out;
+}
+
+// Compress per-glyph stamps onto their group, then sweep the glyphs inside a
+// group 35 ms apart (js/lrc.js groupCharTimes).
+static vector<double> group_char_times(const string& text, const vector<double>& ct, int seed) {
+    auto gs = word_groups(text, ct, seed);
+    if (gs.empty()) return ct;
+    vector<double> out = ct;
+    for (const auto& g : gs)
+        for (int i = g.i0; i < g.i1; i++) out[i] = g.t + (i - g.i0) * 0.035;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// gen: field layout (port of js/layout.mjs layoutField) — serpentine world
+// positions, per-cue camera stops and per-line exits. All double: the output
+// is scene JSON, so it must round-trip exactly like node's, unlike the
+// renderer's float pipeline.
+// ---------------------------------------------------------------------------
+
+using d3 = std::array<double, 3>;
+
+static double clamp_d(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// js/anim.mjs easeApply — clamp01 first, then the curve (all double).
+static double ease_apply_d(const string& name, double x) {
+    x = clamp_d(x, 0.0, 1.0);
+    if (name == "linear") return x;
+    if (name == "ease_in_quad") return x * x;
+    if (name == "ease_out_quad") return 1 - (1 - x) * (1 - x);
+    if (name == "ease_in_out_cubic") return x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2;
+    if (name == "back_out") {
+        const double C1 = 1.70158, C3 = C1 + 1;
+        double u = x - 1;
+        return 1 + C3 * u * u * u + C1 * u * u;
+    }
+    return x * x * (3 - 2 * x);  // smooth (default)
+}
+
+// js/anim.mjs evalOrbit — movement easing + sequential stop easing with the
+// exact from* chaining (fr/fe/…), all double.
+static void eval_orbit_d(const ojson& o, double t, double& radius, double& elevation,
+                         d3& target, double& yaw, double& roll) {
+    radius = o.at("radius").get<double>();
+    elevation = o.at("elevation").get<double>();
+    target = {o.at("target")[0].get<double>(), o.at("target")[1].get<double>(),
+              o.at("target")[2].get<double>()};
+    double yaw_off = 0, roll_off = 0;
+    auto m = o.find("movement");
+    if (m != o.end() && m->is_object()) {
+        double at = m->contains("at") && (*m)["at"].is_number() ? (*m)["at"].get<double>() : 0.0;
+        double dur = m->contains("duration") && (*m)["duration"].is_number()
+                         ? (*m)["duration"].get<double>()
+                         : 1.0;
+        double k = ease_apply_d(m->value("ease", string("ease_in_out_cubic")), (t - at) / max(dur, 1e-6));
+        auto re = m->find("radius_end");
+        if (re != m->end() && re->is_number()) radius = radius + (re->get<double>() - radius) * k;
+        auto ee = m->find("elevation_end");
+        if (ee != m->end() && ee->is_number())
+            elevation = elevation + (ee->get<double>() - elevation) * k;
+        auto te = m->find("target_end");
+        if (te != m->end() && te->is_array())
+            target = {target[0] + ((*te)[0].get<double>() - target[0]) * k,
+                      target[1] + ((*te)[1].get<double>() - target[1]) * k,
+                      target[2] + ((*te)[2].get<double>() - target[2]) * k};
+    }
+    auto stops = o.find("stops");
+    if (stops != o.end() && stops->is_array()) {
+        double fr = radius, fe = elevation, fyaw = yaw_off, froll = roll_off;
+        d3 ft = target;
+        for (const auto& s : *stops) {
+            double at = s.contains("at") && s["at"].is_number() ? s["at"].get<double>() : 0.0;
+            if (t < at) break;
+            double dur = s.contains("duration") && s["duration"].is_number()
+                             ? s["duration"].get<double>()
+                             : 1.0;
+            double k = ease_apply_d(s.contains("ease") && s["ease"].is_string()
+                                        ? s["ease"].get<string>()
+                                        : string("ease_in_out_cubic"),
+                                    (t - at) / max(dur, 1e-6));
+            auto rad = s.find("radius");
+            double tr = rad != s.end() && rad->is_number() ? rad->get<double>() : fr;
+            auto elv = s.find("elevation");
+            double te2 = elv != s.end() && elv->is_number() ? elv->get<double>() : fe;
+            d3 tt = ft;
+            auto tg = s.find("target");
+            if (tg != s.end() && tg->is_array())
+                tt = {(*tg)[0].get<double>(), (*tg)[1].get<double>(), (*tg)[2].get<double>()};
+            auto yw = s.find("yaw");
+            double tyaw = yw != s.end() && yw->is_number() ? yw->get<double>() : fyaw;
+            auto rl = s.find("roll");
+            double troll = rl != s.end() && rl->is_number() ? rl->get<double>() : froll;
+            radius = fr + (tr - fr) * k;
+            elevation = fe + (te2 - fe) * k;
+            target = {ft[0] + (tt[0] - ft[0]) * k, ft[1] + (tt[1] - ft[1]) * k,
+                      ft[2] + (tt[2] - ft[2]) * k};
+            yaw_off = fyaw + (tyaw - fyaw) * k;
+            roll_off = froll + (troll - froll) * k;
+            fr = tr;
+            fe = te2;
+            ft = tt;
+            fyaw = tyaw;
+            froll = troll;
+        }
+    }
+    yaw = (o.contains("start_yaw") && o["start_yaw"].is_number() ? o["start_yaw"].get<double>() : 0.0) +
+          (o.contains("speed") && o["speed"].is_number() ? o["speed"].get<double>() : 0.0) * t +
+          yaw_off;
+    roll = roll_off;
+}
+
+struct BasisD {
+    d3 eye, fwd, right, up;
+};
+
+// js/anim.mjs orbitEye + cameraBasis — pinhole basis built the way
+// Object3D.lookAt builds it (world up is +Y).
+static BasisD camera_basis_d(double radius, double elevation, const d3& target, double yaw) {
+    double ce = cos(elevation), se = sin(elevation);
+    d3 eye = {target[0] + radius * ce * cos(yaw), target[1] + radius * se,
+              target[2] + radius * ce * sin(yaw)};
+    double fx = target[0] - eye[0], fy = target[1] - eye[1], fz = target[2] - eye[2];
+    double fl = hypot(hypot(fx, fy), fz);
+    if (fl == 0) fl = 1;  // Math.hypot(...) || 1
+    fx /= fl;
+    fy /= fl;
+    fz /= fl;
+    // right = normalize(cross(forward, worldUp)); cross((x,y,z),(0,1,0)) = (-z,0,x)
+    double rx = -fz, ry = 0.0, rz = fx;
+    double rl = hypot(hypot(rx, ry), rz);
+    if (rl == 0) rl = 1;
+    rx /= rl;
+    ry /= rl;
+    rz /= rl;
+    // up' = cross(right, forward)
+    d3 up = {ry * fz - rz * fy, rz * fx - rx * fz, rx * fy - ry * fx};
+    return {eye, {fx, fy, fz}, {rx, ry, rz}, up};
+}
+
+// js/anim.mjs projectNDC — NDC of p in [-1,1] across the frame; false when it
+// sits behind the eye (JS null).
+static bool project_ndc_d(const BasisD& b, const d3& p, double fov, double aspect, double& x,
+                          double& y) {
+    double vx = p[0] - b.eye[0], vy = p[1] - b.eye[1], vz = p[2] - b.eye[2];
+    double zc = vx * b.fwd[0] + vy * b.fwd[1] + vz * b.fwd[2];
+    if (zc <= 1e-6) return false;
+    double xc = vx * b.right[0] + vy * b.right[1] + vz * b.right[2];
+    double yc = vx * b.up[0] + vy * b.up[1] + vz * b.up[2];
+    double th = tan(fov / 2);
+    x = (xc / zc) / (th * aspect);
+    y = (yc / zc) / th;
+    return true;
+}
+
+// js/layout.mjs rng — mulberry-style counter, Math.imul arithmetic.
+static uint32_t js_imul(uint32_t a, uint32_t b) { return (uint32_t)((uint64_t)a * b); }
+static uint32_t to_uint32(double v) {
+    double m = fmod(v, 4294967296.0);
+    if (m < 0) m += 4294967296.0;
+    return (uint32_t)m;
+}
+struct JsRng {
+    uint32_t s;
+    explicit JsRng(double seed) {
+        uint32_t u = to_uint32(seed);
+        s = u ? u : 1;
+    }
+    double next() {
+        s += 0x6d2b79f5u;  // (s + k) >>> 0
+        uint32_t t = s;
+        t = js_imul(t ^ (t >> 15), t | 1);
+        t = t ^ (uint32_t)(t + js_imul(t ^ (t >> 7), t | 61));
+        return (double)(uint32_t)(t ^ (t >> 14)) / 4294967296.0;
+    }
+};
+
+struct Stage {
+    double r_add, sx, sy, el;
+};
+// Framing presets, cycled by line index. rAdd dollies out (which is what
+// creates room for sx); sx/sy are the line's slot in NDC; el tilts the orbit.
+static const Stage STAGES[] = {
+    {0.0, 0.0, 0.0, 0.0},    // 0 centre close-up
+    {0.6, -0.16, 0.14, 0.03},   // 1 slight wide, upper-left
+    {0.25, 0.07, -0.2, -0.02},  // 2 near, lower-right
+    {0.8, 0.0, 0.24, 0.04},     // 3 high angle, top third
+    {0.45, 0.14, -0.08, -0.01}, // 4 near, right
+    {0.15, -0.04, -0.22, 0.02}, // 5 low close, bottom third
+    {0.65, 0.1, 0.1, -0.03},    // 6 near diagonal
+};
+static const int STAGE_COUNT = (int)(sizeof STAGES / sizeof STAGES[0]);
+
+// The bank and swing carried by each flight.
+static const double FLY_YAW[] = {0.05, -0.07, 0.03, -0.05, 0.06, -0.03, 0.04};
+static const double FLY_ROLL[] = {0.03, -0.04, 0.05, -0.02, 0.04, -0.05, 0.02};
+static const int FLY_COUNT = (int)(sizeof FLY_YAW / sizeof FLY_YAW[0]);
+
+// The vocabulary of a move; one nonzero axis each, insertion order = the
+// order the rng draws kinds in.
+struct MoveSpec {
+    const char* name;
+    double d_roll, d_yaw, d_r, d_e, dx, dy;
+};
+static const MoveSpec MOVES[] = {
+    {"rollL", -1, 0, 0, 0, 0, 0}, {"rollR", 1, 0, 0, 0, 0, 0},
+    {"yawL", 0, -1, 0, 0, 0, 0},  {"yawR", 0, 1, 0, 0, 0, 0},
+    {"push", 0, 0, -1, 0, 0, 0},  {"pull", 0, 0, 1, 0, 0, 0},
+    {"crane", 0, 0, 0, 1, 0, 0},  {"tilt", 0, 0, 0, -1, 0, 0},
+    {"down", 0, 0, 0, 0, 0, -1},  {"up", 0, 0, 0, 0, 0, 1},
+    {"right", 0, 0, 0, 0, 1, 0},  {"left", 0, 0, 0, 0, -1, 0},
+};
+static const int MOVE_COUNT = (int)(sizeof MOVES / sizeof MOVES[0]);
+static const char* EASE_NAMES[] = {"ease_in_out_cubic", "ease_out_quad", "ease_in_quad",
+                                   "smooth"};
+
+struct ChoreoMove {
+    string kind;
+    double mag = 0, lead = 0, pace = 0;
+    string ease;
+    int spec_idx = 0;  // row in MOVES (kind's lookup index)
+};
+
+// One line's phrase: an optional kick on the beat itself, then one move per
+// gap between word groups (js/layout.mjs rollChoreo).
+struct Phrase {
+    ChoreoMove kick;
+    bool has_kick = false;
+    vector<ChoreoMove> between;
+};
+
+// Roll one move: which axis, how far, which ease, and whether it leads. The
+// magnitude band follows the axis: banks 0.05-0.16, swings 0.07-0.20,
+// dolly 0.5-1.5, tilt 0.02-0.07, pans 0.06-0.15.
+static ChoreoMove roll_move(JsRng& r) {
+    int kidx = (int)floor(r.next() * MOVE_COUNT);
+    if (kidx >= MOVE_COUNT) kidx = MOVE_COUNT - 1;
+    if (kidx < 0) kidx = 0;
+    const MoveSpec& spec = MOVES[kidx];
+    ChoreoMove m;
+    m.kind = spec.name;
+    m.spec_idx = kidx;
+    if (spec.d_roll != 0)
+        m.mag = 0.05 + r.next() * 0.11;
+    else if (spec.d_yaw != 0)
+        m.mag = 0.07 + r.next() * 0.13;
+    else if (spec.d_r != 0)
+        m.mag = 0.5 + r.next() * 1.0;
+    else if (spec.d_e != 0)
+        m.mag = 0.02 + r.next() * 0.05;
+    else
+        m.mag = 0.06 + r.next() * 0.09;
+    m.ease = EASE_NAMES[min((size_t)floor(r.next() * 4), (size_t)3)];
+    // > 0 the camera settles before the word lands, < 0 it trails it.
+    m.lead = -0.16 + r.next() * 0.42;
+    // Fraction of the gap to the next beat the move is allowed to spend.
+    m.pace = 0.5 + r.next() * 0.35;
+    return m;
+}
+
+// One line's phrase: an optional kick on the beat itself, then one move per
+// gap between word groups.
+static Phrase roll_choreo(int groups, int seed) {
+    JsRng r(seed);
+    Phrase p;
+    if (r.next() < 0.72) {
+        p.kick = roll_move(r);
+        p.has_kick = true;
+    }
+    for (int j = 1; j < groups; j++) p.between.push_back(roll_move(r));
+    return p;
+}
+
+static string signature_of(const Phrase& ch) {
+    string s = ch.has_kick ? ch.kick.kind : "-";
+    s += ">";
+    for (size_t j = 0; j < ch.between.size(); j++) {
+        if (j) s += ",";
+        s += ch.between[j].kind;
+    }
+    return s;
+}
+
+// Give every line its own phrase; signatures are unique by construction (a
+// collision re-rolls that line with a new salt). Line 0 keeps the hand-written
+// opening in front of its roll.
+static vector<Phrase> assign_choreo(const vector<int>& group_counts) {
+    vector<string> used;
+    vector<Phrase> out;
+    for (size_t i = 0; i < group_counts.size(); i++) {
+        int k = group_counts[i];
+        bool is_first = i == 0;
+        int need = k - 1 > 0 ? k - 1 : 0;
+        ChoreoMove prefix_kick;
+        vector<ChoreoMove> prefix_between;
+        int kept = 0;
+        if (is_first) {
+            prefix_kick.kind = "down";
+            prefix_kick.spec_idx = 8;  // MOVES: down
+            prefix_kick.mag = 0.34;
+            prefix_kick.ease = "ease_out_quad";
+            prefix_kick.lead = -0.12;
+            prefix_kick.pace = 0.85;
+            ChoreoMove b0;
+            b0.kind = "up";
+            b0.spec_idx = 9;
+            b0.mag = 0.13;
+            b0.ease = "smooth";
+            b0.lead = 0.1;
+            b0.pace = 0.6;
+            ChoreoMove b1;
+            b1.kind = "right";
+            b1.spec_idx = 10;
+            b1.mag = 0.31;
+            b1.ease = "ease_in_out_cubic";
+            b1.lead = 0.14;
+            b1.pace = 0.8;
+            prefix_between = {b0, b1};
+            kept = (int)min(prefix_between.size(), (size_t)need);
+        }
+        bool placed = false;
+        for (int salt = 0; salt < 80 && !placed; salt++) {
+            JsRng r(to_uint32((double)i * 7919.0 + (double)salt * 104729.0 + 17.0));
+            Phrase ch;
+            if (is_first) {
+                ch.kick = prefix_kick;
+                ch.has_kick = true;
+                for (int j = 0; j < kept; j++) ch.between.push_back(prefix_between[j]);
+                for (int j = kept; j < need; j++) ch.between.push_back(roll_move(r));
+            } else {
+                if (r.next() < 0.72) {
+                    ch.kick = roll_move(r);
+                    ch.has_kick = true;
+                }
+                for (int j = 0; j < need; j++) ch.between.push_back(roll_move(r));
+            }
+            string sig = signature_of(ch);
+            bool dup = false;
+            for (const auto& u : used)
+                if (u == sig) dup = true;
+            if (!dup) {
+                used.push_back(sig);
+                out.push_back(move(ch));
+                placed = true;
+            }
+        }
+        if (!placed) out.push_back(roll_choreo(k, (int)i + 1));
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// gen: field layout (port of js/layout.mjs layoutField) — serpentine world
+// positions, per-cue camera stops and per-line exits. All double: the output
+// is scene JSON, so it must round-trip exactly like node's, unlike the
+// renderer's float pipeline.
+// ---------------------------------------------------------------------------
+
+// Serpentine grid (GRID + gridPositions): row 0 runs from the middle column to
+// the end so line 0 lands on the world origin where the default camera already
+// looks; rows 1.. then snake left and right.
+static vector<d3> grid_positions(int n) {
+    const int cols = 5;
+    const double x_step = 30, y_step = 15;
+    double half = (cols - 1) / 2.0;
+    vector<d3> out;
+    int row = 0, col = (int)half, dir = 1;
+    for (int i = 0; i < n; i++) {
+        out.push_back({(col - half) * x_step, row * y_step, 0.0});
+        if (dir > 0) {
+            if (col < cols - 1) col += 1;
+            else {
+                row += 1;
+                dir = -1;
+            }
+        } else if (col > 0) {
+            col -= 1;
+        } else {
+            row += 1;
+            dir = 1;
+        }
+    }
+    return out;
+}
+
+// Does the line still fit the frame from this framing? (framingFits) A rolled
+// picture rotates the line's screen box; inflate the box by the roll's
+// axis-aligned extent and test the four corners.
+static bool framing_fits(const d3& P, const d3& target, double radius, double elevation,
+                         double yaw, double roll, double hw, double hh, double th,
+                         double aspect, double fov) {
+    BasisD basis = camera_basis_d(radius, elevation, target, yaw);
+    double r = roll != 0 && !isnan(roll) ? roll : 0.0;  // Math.cos(roll || 0)
+    double c = fabs(cos(r)), s = fabs(sin(r));
+    double ew = hw * c + hh * s;
+    double eh = hh * c + hw * s;
+    const d3 pts[4] = {{P[0] - ew, P[1] - eh, P[2]},
+                       {P[0] + ew, P[1] - eh, P[2]},
+                       {P[0] - ew, P[1] + eh, P[2]},
+                       {P[0] + ew, P[1] + eh, P[2]}};
+    for (const d3& pt : pts) {
+        double x, y;
+        if (!project_ndc_d(basis, pt, fov, aspect, x, y)) return false;
+        // 7% of the frame is kept back for the outline rim and the bloom bleed.
+        if (fabs(x) > 0.93 || fabs(y) > 0.94) return false;
+    }
+    return true;
+}
+
+// Is the axis-aligned box around P (half extents hw/hh) on screen?
+// (boxOnFrame — corners behind the eye are tolerated, a box entirely behind
+// the eye is not.)
+static bool box_on_frame(double radius, double elevation, const d3& target, double yaw,
+                         double roll, const d3& P, double hw, double hh, double fov,
+                         double aspect) {
+    BasisD basis = camera_basis_d(radius, elevation, target, yaw);
+    double r = roll != 0 && !isnan(roll) ? roll : 0.0;
+    double c = fabs(cos(r)), s = fabs(sin(r));
+    double ew = hw * c + hh * s;
+    double eh = hh * c + hw * s;
+    bool behind = false, any = false;
+    double min_x = INFINITY, min_y = INFINITY, max_x = -INFINITY, max_y = -INFINITY;
+    const d3 pts[4] = {{P[0] - ew, P[1] - eh, P[2]},
+                       {P[0] + ew, P[1] - eh, P[2]},
+                       {P[0] - ew, P[1] + eh, P[2]},
+                       {P[0] + ew, P[1] + eh, P[2]}};
+    for (const d3& pt : pts) {
+        double x, y;
+        if (!project_ndc_d(basis, pt, fov, aspect, x, y)) {
+            behind = true;
+            continue;
+        }
+        any = true;
+        min_x = js_min(min_x, x);
+        max_x = js_max(max_x, x);
+        min_y = js_min(min_y, y);
+        max_y = js_max(max_y, y);
+    }
+    if (!any) return false;   // every corner behind the eye
+    if (behind) return true;  // straddling the eye: count it as seen
+    return !(max_x < -1 || min_x > 1 || max_y < -1 || min_y > 1);
+}
+
+struct FieldLayout {
+    vector<d3> positions;
+    vector<double> exits;  // NaN = leave the block's own timing (--keep-open)
+    ojson stops = ojson::array();
+};
+
+// Lay the lines out as a camera path (layoutField). See js/layout.mjs for the
+// full narration; formulas are kept line-for-line. Energy loading lives with
+// the CLI section (load_energy) — it reads a file, the layout itself is pure.
+static FieldLayout layout_field(const vector<LrcLine>& lines, const ojson& camera,
+                                double duration, double fov, double aspect, double size,
+                                double fit_width, double fade_in, double outro_at,
+                                double title_out, bool groups_auto, double whip,
+                                const vector<double>* energy,
+                                const vector<bool>* whip_force) {
+    const int n = (int)lines.size();
+    FieldLayout out;
+    if (!n) return out;
+
+    vector<double> cues(n);
+    for (int i = 0; i < n; i++) cues[i] = lines[i].time;
+    out.positions = grid_positions(n);
+
+    // Work from the rig without stops: the stops we emit are built on the
+    // orbit + movement, and cameraAnimation never has any yet when this runs.
+    ojson rig = camera;
+    rig.erase("stops");
+
+    double th = tan(fov / 2);
+    auto half_w_at = [&](double r) { return th * aspect * r; };
+    auto half_h_at = [&](double r) { return th * r; };
+
+    // The tightest the frame ever gets. The v9 rig stays within ±1.3 of the
+    // orbit's own radius at that cue; framingFits vetoes anything past the edge.
+    double base_r;
+    {
+        double r = camera.contains("radius") && camera["radius"].is_number()
+                       ? camera["radius"].get<double>()
+                       : numeric_limits<double>::quiet_NaN();
+        base_r = r != 0 && !isnan(r) ? r : 14.0;  // Number(camera.radius) || 14
+    }
+    double rmax_cap = js_min(16.0, base_r + 1.3);  // rmax=16 (default)
+
+    // World half-extents of each line, matching how Rust resolves fit_width.
+    vector<double> box_w(n), box_h(n), reveal_end(n);
+    for (int i = 0; i < n; i++) {
+        double em = em_width(lines[i].text);
+        double width = em > 0 ? js_min(em * size, fit_width) : 0.0;
+        double resolved = em > 0 ? width / em : size;
+        box_w[i] = width / 2;
+        box_h[i] = resolved * 0.55;  // half the em box + rim/bloom margin
+        const vector<double>* ctp = lines[i].has_ct ? &lines[i].ct : nullptr;
+        reveal_end[i] = ctp && !ctp->empty() ? *max_element(ctp->begin(), ctp->end())
+                                             : cues[i];
+    }
+
+    // Return to the title framing before the outro.
+    double tail = isfinite(outro_at) ? outro_at : duration;
+    double last_cue = cues[n - 1];
+    double back_at = tail - 12;
+    if (back_at < last_cue + 0.6) back_at = last_cue + 0.6;
+    double back_dur = tail - back_at;
+
+    // Flights in, one per line — computed first, because a line's own phrase
+    // may never run into the flight that carries the camera to the next one.
+    vector<double> flight_at(n), flight_dur(n);
+    for (int i = 0; i < n; i++) {
+        double next = i + 1 < n ? cues[i + 1] : duration;
+        double gap = js_max(next - cues[i], 0.2);
+        double capped = js_min(14.0, gap - 0.4);
+        double d = js_max(1.2, js_min(js_min(gap * 0.45, capped), 2.0));  // TRAVEL_MAX
+        double start = cues[i] - d;
+        // One stop may never begin before the previous cue; the opening card
+        // holds still until it is gone.
+        if (i == 0 && isfinite(title_out)) start = js_max(start, title_out);
+        else if (i > 0) start = js_max(start, cues[i - 1] + 0.8);
+        start = js_min(start, cues[i] - 0.4);
+        flight_at[i] = start;
+        flight_dur[i] = js_max(cues[i] - start, 0.4);
+    }
+
+    // Whip rolls on the flights. Only energetic lines earn one, and not all of
+    // them; the sign is handed out at emission time so flight whips and word
+    // whips share one alternation.
+    auto energy_at = [&](int i) -> double {
+        double v = energy && i < (int)energy->size() ? (*energy)[i] : 0.5;
+        v = clamp_d(v, 0.0, 1.0);
+        return isnan(v) ? 0.0 : v;  // clamp(NaN) is NaN, `|| 0` fixes it
+    };
+    auto force_of = [&](int i) -> bool {
+        return whip_force && i < (int)whip_force->size() && (*whip_force)[i];
+    };
+    vector<double> flight_whip(n, 0.0);
+    double whip_sign = 0;
+    if (whip > 0) {
+        for (int i = 0; i < n; i++) {
+            JsRng r(to_uint32((double)i * 2654435761.0 + 101.0));
+            double e = energy_at(i);
+            bool forced = force_of(i);
+            // The r() draw is only consumed when the meter is actually asked
+            // (JS && short-circuit) — the stream must stay aligned with node's.
+            if ((!forced && e < 0.52) || flight_dur[i] < 1.0 || (!forced && r.next() < 0.22))
+                continue;
+            flight_whip[i] =
+                (M_PI / 2) * (0.8 + 0.2 * r.next()) * js_min(whip, 1.0) * (0.72 + 0.28 * e);
+        }
+    }
+
+    // Per-word choreography: with groups auto every line is cut into words that
+    // land together, each gap between them getting its own camera move.
+    vector<vector<WordGroup>> group_lists;
+    vector<Phrase> choreo;
+    if (groups_auto) {
+        for (int i = 0; i < n; i++) {
+            vector<WordGroup> g =
+                word_groups(lines[i].text, lines[i].has_ct ? lines[i].ct : vector<double>(), i);
+            if (g.empty()) g.push_back({0, 1, cues[i], -1});
+            group_lists.push_back(move(g));
+        }
+        vector<int> counts;
+        for (const auto& g : group_lists) counts.push_back((int)g.size());
+        choreo = assign_choreo(counts);
+        // The last glyph of a line now lands with its group, so the exit scan
+        // waits for the group rather than for the glyph it used to wait for.
+        for (int i = 0; i < n; i++) {
+            const WordGroup& g = group_lists[i].back();
+            reveal_end[i] = g.t + js_max(0.0, (double)(g.i1 - g.i0 - 1)) * 0.035;
+        }
+    }
+
+    vector<double> line_ends(n, 0.0);
+    for (int i = 0; i < n; i++) {
+        const Stage& stage = STAGES[i % STAGE_COUNT];
+        double base_radius, base_elevation, base_yaw, base_roll;
+        d3 base_target;
+        eval_orbit_d(rig, cues[i], base_radius, base_elevation, base_target, base_yaw,
+                     base_roll);
+        // The zoom budget rides with the orbit: ±1.3 around wherever the long
+        // dolly has the camera at this cue.
+        double line_base = base_radius;
+        double r_lo = js_max(11.6, line_base - 1.3);
+        double r_hi = js_max(r_lo + 0.8, js_min(rmax_cap, line_base + 1.3));
+        double radius = clamp_d(line_base + stage.r_add, r_lo, r_hi);
+        double elevation = clamp_d(base_elevation + stage.el, 0.0, 0.42);
+        double fw = half_w_at(radius);
+        double fh = half_h_at(radius);
+        // Room the frame actually has once the line's half-width and a rim/bloom
+        // margin are taken out.
+        double room_x = js_max(0.0, 1 - 0.15 - box_w[i] / fw);
+        double room_y = js_max(0.0, 1 - box_h[i] / fh - 0.1);
+        double sx = clamp_d(stage.sx, -room_x, room_x);
+        double sy = clamp_d(stage.sy, -room_y, room_y);
+
+        // Screen basis at the cue with target at the origin — orientation only,
+        // which is exactly what an independent slot needs.
+        BasisD basis = camera_basis_d(radius, elevation, {0, 0, 0}, base_yaw);
+        const d3& P = out.positions[i];
+        d3 off = {sx * fw * basis.right[0] + sy * fh * basis.up[0],
+                  sx * fw * basis.right[1] + sy * fh * basis.up[1],
+                  sx * fw * basis.right[2] + sy * fh * basis.up[2]};
+        d3 slot = {P[0] - off[0], P[1] - off[1], P[2] - off[2]};
+        double fly_yaw = FLY_YAW[i % FLY_COUNT];
+        double fly_roll = FLY_ROLL[i % FLY_COUNT];
+        // The slot was solved for the plain orbit; if the banked framing cannot
+        // hold the line, fly it level instead of shrinking the shot.
+        if (!framing_fits(P, slot, radius, elevation, base_yaw + fly_yaw, fly_roll, box_w[i],
+                          box_h[i], th, aspect, fov)) {
+            fly_yaw = 0;
+            fly_roll = 0;
+        }
+
+        // A whipped transition is three stops: bank in while the outgoing
+        // framing holds, fly while the bank unwinds past level (back_out
+        // overshoots — the whip-crack), then settle level just after the beat.
+        double whip_mag = flight_whip[i];
+        double flight_settle_end = flight_at[i] + flight_dur[i];
+        if (whip_mag != 0) {
+            whip_sign = whip_sign == 0 ? 1 : -whip_sign;
+            double signed_mag = whip_mag * whip_sign;
+            double dA = js_max(0.5, flight_dur[i] * 0.55);
+            double dB = js_max(0.45, flight_dur[i] - dA);
+            double gap_next = (i + 1 < n ? cues[i + 1] : duration + 10) - cues[i];
+            double settle_clamp =
+                js_min(js_min(0.55, js_max(0.12, gap_next - 0.88)),
+                       back_at - (cues[i] + 0.08) - 0.02);
+            {
+                ojson s = ojson::object();
+                s["at"] = round3(flight_at[i]);
+                s["duration"] = round3(dA);
+                s["ease"] = "ease_in_quad";
+                s["roll"] = round3(signed_mag);
+                out.stops.push_back(move(s));
+            }
+            {
+                ojson s = ojson::object();
+                s["at"] = round3(flight_at[i] + dA);
+                s["duration"] = round3(dB);
+                s["ease"] = "back_out";
+                s["target"] = ojson::array({round3(slot[0]), round3(slot[1]), round3(slot[2])});
+                s["radius"] = round3(radius);
+                s["elevation"] = round3(elevation);
+                s["yaw"] = round3(fly_yaw);
+                s["roll"] = round3(fly_roll);
+                out.stops.push_back(move(s));
+            }
+            if (settle_clamp >= 0.1) {
+                ojson s = ojson::object();
+                s["at"] = round3(cues[i] + 0.08);
+                s["duration"] = round3(settle_clamp);
+                s["ease"] = "ease_out_quad";
+                s["roll"] = 0;
+                out.stops.push_back(move(s));
+                flight_settle_end = cues[i] + 0.08 + settle_clamp;
+            }
+        } else {
+            ojson s = ojson::object();
+            s["at"] = round3(flight_at[i]);
+            s["duration"] = round3(flight_dur[i]);
+            s["ease"] = "ease_in_out_cubic";
+            s["target"] = ojson::array({round3(slot[0]), round3(slot[1]), round3(slot[2])});
+            s["radius"] = round3(radius);
+            s["elevation"] = round3(elevation);
+            s["yaw"] = round3(fly_yaw);
+            s["roll"] = round3(fly_roll);
+            out.stops.push_back(move(s));
+        }
+
+        double last_end = flight_settle_end;
+        if (!groups_auto) {
+            line_ends[i] = last_end;
+            continue;
+        }
+
+        // The phrase: an optional kick on the beat itself, then one move per gap
+        // between word groups.
+        const vector<WordGroup>& groups_i = group_lists[i];
+        double deadline = i + 1 < n ? flight_at[i + 1] : back_at;
+        struct PlanItem {
+            const ChoreoMove* m;
+            double on;
+            bool kick;
+        };
+        vector<PlanItem> plan;
+        if (choreo[i].has_kick) plan.push_back({&choreo[i].kick, cues[i], true});
+        for (size_t j = 1; j < groups_i.size(); j++)
+            plan.push_back({&choreo[i].between[j - 1], groups_i[j].t, false});
+
+        // One in-phrase whip on the widest word gap of a very energetic line —
+        // at most one per line, and line 0 is always in (the opening is the
+        // pitch). The sign is only spent when the pair is actually placed.
+        int whip_gap_idx = -1;
+        double whip_gap_scale = 0;
+        if (whip > 0 && (energy_at(i) >= 0.78 || i == 0 || force_of(i)) && groups_i.size() > 2) {
+            double best = 0;
+            for (size_t j = 1; j < groups_i.size(); j++) {
+                double gap_len = groups_i[j].t - groups_i[j - 1].t;
+                if (gap_len > best) {
+                    best = gap_len;
+                    whip_gap_idx = (int)j - 1;
+                }
+            }
+            if (best < 1.0) {
+                whip_gap_idx = -1;
+            } else {
+                JsRng r2(to_uint32((double)i * 97.0 + 13.0));
+                whip_gap_scale = i == 0 ? (M_PI / 2) * (0.85 + 0.1 * r2.next())
+                                        : 0.5 + 0.35 * r2.next();
+            }
+        }
+
+        double cur_r = radius, cur_e = elevation, cur_yaw = fly_yaw, cur_roll = fly_roll;
+        for (int k = 0; k < (int)plan.size(); k++) {
+            const ChoreoMove* m = plan[k].m;
+            double on = plan[k].on;
+            bool kick = plan[k].kick;
+            double next_on = k + 1 < (int)plan.size() ? plan[k + 1].on : deadline + 0.35;
+            double span = js_max(next_on - on, 0.18);
+
+            // The in-phrase whip: bank in ahead of the word, unwind on it.
+            // Falls through to the ordinary move when the gap turns out too
+            // tight once the neighbouring stops have claimed their time.
+            if (whip_gap_idx >= 0 && !kick && on == groups_i[whip_gap_idx + 1].t) {
+                double dA = js_min(0.45, js_max(0.24, span * 0.3));
+                double dB = js_min(0.55, js_max(0.28, span * 0.34));
+                double at_a = js_max(last_end + 0.02, on - dA - 0.05);
+                if (at_a + dA <= on - 0.01 && on + dB <= deadline - 0.02) {
+                    whip_sign = whip_sign == 0 ? 1 : -whip_sign;
+                    double mag = whip_gap_scale * js_min(whip, 1.0) * whip_sign;
+                    {
+                        ojson s = ojson::object();
+                        s["at"] = round3(at_a);
+                        s["duration"] = round3(dA);
+                        s["ease"] = "ease_in_quad";
+                        s["roll"] = round3(mag);
+                        out.stops.push_back(move(s));
+                    }
+                    {
+                        ojson s = ojson::object();
+                        s["at"] = round3(on);
+                        s["duration"] = round3(dB);
+                        s["ease"] = "ease_out_quad";
+                        s["roll"] = round3(cur_roll);
+                        out.stops.push_back(move(s));
+                    }
+                    last_end = on + dB;
+                    whip_gap_idx = -1;
+                    continue;
+                }
+            }
+
+            double dur = js_max(0.18, js_min(span * m->pace, 1.1));
+            double at = kick ? on : on - m->lead - dur;
+            at = js_max(at, last_end + 0.02);
+            if (at + dur > deadline) dur = deadline - at;
+            if (dur < 0.12) continue;
+
+            const MoveSpec& spec = MOVES[m->spec_idx];
+            double dx_n = spec.dx * m->mag;
+            double dy_n = spec.dy * m->mag;
+            // Shrink the move until the line is still comfortably inside the
+            // frame at the new framing; six halvings are the budget, a move
+            // that still fails is dropped rather than forced.
+            double scale = 1.0;
+            d3 T = slot;
+            double n_r = cur_r, n_e = cur_e, n_y = cur_yaw, n_ro = cur_roll;
+            bool ok = false;
+            for (int tries = 0; tries < 6; tries++) {
+                n_r = clamp_d(cur_r + spec.d_r * m->mag * scale, r_lo, r_hi);
+                n_e = clamp_d(cur_e + spec.d_e * m->mag * scale, 0.0, 0.42);
+                n_y = clamp_d(cur_yaw + spec.d_yaw * m->mag * scale, -0.26, 0.26);
+                n_ro = clamp_d(cur_roll + spec.d_roll * m->mag * scale, -0.24, 0.24);
+                double fw2 = half_w_at(n_r);
+                double fh2 = half_h_at(n_r);
+                // With the eye swung around the line, the pan direction turns too.
+                BasisD b2 = camera_basis_d(n_r, n_e, {0, 0, 0}, base_yaw + n_y);
+                T = {slot[0] + dx_n * scale * fw2 * b2.right[0] + dy_n * scale * fh2 * b2.up[0],
+                     slot[1] + dx_n * scale * fw2 * b2.right[1] + dy_n * scale * fh2 * b2.up[1],
+                     slot[2] + dx_n * scale * fw2 * b2.right[2] + dy_n * scale * fh2 * b2.up[2]};
+                if (framing_fits(P, T, n_r, n_e, base_yaw + n_y, n_ro, box_w[i], box_h[i], th,
+                                 aspect, fov)) {
+                    ok = true;
+                    break;
+                }
+                scale *= 0.5;
+            }
+            if (!ok) continue;
+            // A move that ended up nowhere is not worth a stop.
+            if (n_r == cur_r && n_e == cur_e && n_y == cur_yaw && n_ro == cur_roll &&
+                fabs(T[0] - slot[0]) + fabs(T[1] - slot[1]) + fabs(T[2] - slot[2]) < 1e-3)
+                continue;
+            {
+                ojson s = ojson::object();
+                s["at"] = round3(at);
+                s["duration"] = round3(dur);
+                s["ease"] = m->ease;
+                s["target"] = ojson::array({round3(T[0]), round3(T[1]), round3(T[2])});
+                s["radius"] = round3(n_r);
+                s["elevation"] = round3(n_e);
+                s["yaw"] = round3(n_y);
+                s["roll"] = round3(n_ro);
+                out.stops.push_back(move(s));
+            }
+            cur_r = n_r;
+            cur_e = n_e;
+            cur_yaw = n_y;
+            cur_roll = n_ro;
+            last_end = at + dur;
+        }
+        line_ends[i] = last_end;
+    }
+
+    // Closing return to the title framing; the card is never banked.
+    if (back_dur >= 0.4) {
+        double br, be, byaw, broll;
+        d3 bt;
+        eval_orbit_d(rig, js_min(tail, duration), br, be, bt, byaw, broll);
+        ojson s = ojson::object();
+        s["at"] = round3(back_at);
+        s["duration"] = round3(back_dur);
+        s["ease"] = "ease_in_out_cubic";
+        s["target"] = ojson::array({round3(bt[0]), round3(bt[1]), round3(bt[2])});
+        s["radius"] = round3(br);
+        s["elevation"] = round3(be);
+        s["yaw"] = 0;
+        s["roll"] = 0;
+        out.stops.push_back(move(s));
+    }
+
+    // First moment each line is no longer in the shot: scan the camera path.
+    ojson cam = rig;
+    cam["stops"] = out.stops;
+    for (int i = 0; i < n; i++) {
+        const d3& P = out.positions[i];
+        double from = js_max(js_max(cues[i] + fade_in + 0.15, reveal_end[i] + 0.15),
+                             line_ends[i] + 0.15);
+        double exit = numeric_limits<double>::quiet_NaN();
+        for (double t = from; t <= duration; t += 0.1) {
+            double br, be, byaw, broll;
+            d3 bt;
+            eval_orbit_d(cam, t, br, be, bt, byaw, broll);
+            if (!box_on_frame(br, be, bt, byaw, broll, P, box_w[i], box_h[i], fov, aspect)) {
+                exit = round3(t);
+                break;
+            }
+        }
+        out.exits.push_back(exit);
+    }
+
+    return out;
+}
+
 
 struct LyricOpts {
     double size = numeric_limits<double>::quiet_NaN();  // clampNum → 1.5
@@ -2753,6 +3796,7 @@ struct LyricOpts {
     double total = numeric_limits<double>::quiet_NaN();
     string entrance;
     double fit_width = numeric_limits<double>::quiet_NaN();
+    bool groups_auto = false;  // --groups auto: word stamps compress onto groups
     const ojson* jitter = nullptr;
     const ojson* wave = nullptr;
 };
@@ -2845,6 +3889,13 @@ static vector<ojson> build_lyric_texts(const vector<LrcLine>& lines, const Lyric
         if (line.has_ct) {
             has_ct = true;
             for (double v : line.ct) ct.push_back(round3(v + offset));
+            // --groups auto: stamps compress onto their word group, then sweep
+            // the glyphs inside a group 35 ms apart (groupCharTimes).
+            if (o.groups_auto) {
+                vector<double> g = group_char_times(line.text, ct, lyric_index);
+                ct.clear();
+                for (double v : g) ct.push_back(round3(v));
+            }
         }
         double last_glyph = has_ct && !ct.empty() ? *max_element(ct.begin(), ct.end()) : t;
         double next_raw = i + 1 < lines.size() ? lines[i + 1].time + offset : total;
@@ -3404,13 +4455,42 @@ static string read_file(const string& path) {
     return s;
 }
 
-// Single-layout gen never spends the roll budget, but the JS CLI still opens
-// and validates the envelope — keep the same error behaviour.
-static void check_energy_file(const string& path) {
-    string src = read_file(path);
-    json ej = json::parse(src);
-    if (!ej.contains("data") || !ej["data"].is_array() || ej["data"].empty())
+// Per-line audio energy in 0..1 from a precomputed envelope (loadEnergy): the
+// mean band energy around each cue (0.8 s before, 1.5 s after), normalised so
+// the loudest line is 1 and the quietest 0.
+static vector<double> load_energy(const string& path, const vector<LrcLine>& lines) {
+    ojson env = ojson::parse(read_file(path));
+    if (!env.is_object() || !env.contains("data") || !env["data"].is_array() ||
+        env["data"].empty())
         throw runtime_error("--energy-file: " + path + " has no envelope data");
+    double fps = 60.0;  // Number(env.fps) || 60
+    if (env.contains("fps") && env["fps"].is_number()) {
+        double f = env["fps"].get<double>();
+        if (f != 0 && !isnan(f)) fps = f;
+    }
+    double frames = (double)env["data"].size();
+    vector<double> raw;
+    for (const auto& l : lines) {
+        double f0 = js_max(0.0, js_round((l.time - 0.8) * fps));
+        double f1 = js_min(frames - 1.0, js_round((l.time + 1.5) * fps));
+        double sum = 0;
+        double n = 0;
+        for (double f = f0; f <= f1; f++) {
+            const ojson& row = env["data"][(size_t)f];
+            if (!row.is_array() || row.empty()) continue;
+            double m = 0;
+            for (const auto& v : row) m += v.get<double>();
+            sum += m / (double)row.size();
+            n += 1;
+        }
+        raw.push_back(n ? sum / n : 0.0);
+    }
+    double mn = *min_element(raw.begin(), raw.end());
+    double mx = *max_element(raw.begin(), raw.end());
+    double span = mx - mn > 1e-9 ? mx - mn : 1.0;
+    vector<double> out;
+    for (double v : raw) out.push_back(round3((v - mn) / span));
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -3436,9 +4516,8 @@ static void gen_usage() {
         "          --outro-at --outro-text --outro-subtitle --outro-wish --outro-out\n"
         "  stage:  --bg-look --bg-cut --bg-fade --fx --fx-flash --fx-punch\n"
         "          --fx-vignette --fx-chromatic --fx-sat --bloom --fps --palette\n"
-        "  not ported yet (accepted, no-op in single layout): --roll-power\n"
-        "          --force-whip --energy-file; --layout field and --groups auto\n"
-        "          are rejected\n"
+        "  field layout (--layout field): --roll-power --force-whip\n"
+        "          --energy-file (per-line 0..1 audio energy, js/audio-env.mjs output)\n"
         "  -h, --help\n",
         stderr);
 }
@@ -3543,10 +4622,6 @@ static int gen_main(int argc, char** argv) {
             throw runtime_error("--layout must be single or field (got \"" + a.layout + "\")");
         if (a.groups != "off" && a.groups != "auto")
             throw runtime_error("--groups must be off or auto (got \"" + a.groups + "\")");
-        if (a.layout == "field" || a.groups == "auto")
-            throw runtime_error(
-                "chamina-cpp gen: --layout field / --groups auto not ported yet — "
-                "use node js/lrc2scene.mjs");
 
         LrcParsed parsed = parse_lrc(read_file(a.input));
         // The [offset:] tag and --offset both nudge the whole song; the tag
@@ -3610,7 +4685,56 @@ static int gen_main(int argc, char** argv) {
         vector<LrcLine> lyric_lines;
         for (const auto& l : lines)
             if (!l.text.empty()) lyric_lines.push_back(l);
-        if (!a.energy_file.empty()) check_energy_file(a.energy_file);
+
+        // Where the music is loud. Read before the layout so the roll budget is
+        // spent by the track itself; absent the flag no line is ever
+        // "energetic" and the camera path is exactly the one v9 laid out.
+        // (loadEnergy validates the envelope the same way single layout does.)
+        vector<double> energy;
+        if (!a.energy_file.empty()) energy = load_energy(a.energy_file, lyric_lines);
+        // Lines the author named for the whip treatment no matter the meter.
+        vector<bool> whip_force;
+        if (!a.force_whip.empty()) {
+            for (const auto& l : lyric_lines) {
+                bool f = false;
+                for (const auto& txt : a.force_whip)
+                    if (l.text.find(txt) != string::npos) {
+                        f = true;
+                        break;
+                    }
+                whip_force.push_back(f);
+            }
+        }
+        FieldLayout layout;
+        if (a.layout == "field") {
+            // Same clamping buildLyricTexts applies, so the frame budget is
+            // computed against the size the glyphs really get.
+            double size_c = clamp_num(a.size.v, 1.5, 0.2, 12);
+            double fade_in_c = clamp_num(a.fade_in.v, 0.3, 0, 10);
+            double fov = 0.8726646;
+            if (tpl.contains("camera") && tpl["camera"].is_object() &&
+                tpl["camera"].contains("fov") && tpl["camera"]["fov"].is_number()) {
+                double f = tpl["camera"]["fov"].get<double>();
+                if (f != 0 && !isnan(f)) fov = f;
+            }
+            double tw = tpl.contains("width") && tpl["width"].is_number()
+                            ? tpl["width"].get<double>()
+                            : 0.0;
+            if (tw == 0) tw = 1920;
+            double th_ = tpl.contains("height") && tpl["height"].is_number()
+                             ? tpl["height"].get<double>()
+                             : 0.0;
+            if (th_ == 0) th_ = 1080;
+            double aspect = tw / th_;
+            double whip = opt_finite(a.roll_power) ? clamp_d(a.roll_power.v, 0.0, 1.0) : 0.0;
+            layout = layout_field(
+                lyric_lines, camera_animation, duration, fov, aspect, size_c, fit_width,
+                fade_in_c, isfinite(outro_at) ? outro_at : numeric_limits<double>::quiet_NaN(),
+                title_out, a.groups == "auto", whip,
+                a.energy_file.empty() ? nullptr : &energy,
+                a.force_whip.empty() ? nullptr : &whip_force);
+            camera_animation["stops"] = layout.stops;
+        }
 
         ojson jitter_obj = ojson(nullptr);
         if (opt_finite(a.jitter) && a.jitter.v > 0) {
@@ -3645,7 +4769,22 @@ static int gen_main(int argc, char** argv) {
         lo.fit_width = fit_width;
         lo.jitter = jitter_obj.is_null() ? nullptr : &jitter_obj;
         lo.wave = wave_obj.is_null() ? nullptr : &wave_obj;
+        lo.groups_auto = a.groups == "auto";
         vector<ojson> texts = build_lyric_texts(lyric_lines, lo);
+
+        if (a.layout == "field") {
+            // The blocks are all in the single slot buildLyricTexts put them in;
+            // the layout owns their world position and the moment each one has
+            // left frame.
+            for (size_t i = 0; i < texts.size(); i++) {
+                texts[i]["position"] = ojson::array({layout.positions[i][0],
+                                                     layout.positions[i][1],
+                                                     layout.positions[i][2]});
+                ojson* fade = find_fade(texts[i]);
+                if (fade && isfinite(layout.exits[i]))
+                    (*fade)["fade_out_at"] = layout.exits[i];
+            }
+        }
 
         if (!a.outline.empty()) {
             for (auto& t : texts) {

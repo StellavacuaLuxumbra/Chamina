@@ -259,9 +259,7 @@ lyricLines（next cue=下一个非空行）、firstCue 用未过滤 lines[0]。
 **移植范围（第一阶段）**：single 布局默认路径全量——LOOKS 表、背景
 cuts/fade、调色板、fit_width、orbit 重调、相机运动（dolly/crane/shake/
 move/yaw_drift）、标题/副题/片尾卡、fx、jitter/wave、outline、texts 键位
-语义。`--layout field` / `--groups auto`（`js/layout.mjs`，741 行）明确
-拒绝并提示改用 node；`--roll-power`/`--force-whip` 单布局下 no-op；
-`--energy-file` 接受（校验可读 + 有 data）后忽略。
+语义。（第二阶段补齐 `--layout field` / `--groups auto`，见 §十四。）
 
 **验证**：自写测试 LRC（meta/offset/多时间戳/逐字/空行/{e:} 标签）+
 14 组 flag 组合（entrance×4、jitter+wave、offset/duration/fps/tail、
@@ -287,9 +285,7 @@ yaw-drift=0、radius）全部与 node 输出字节级一致；真实语料
    （仍存：ffmpeg popen 的输出文件名经 cmd /c 会损毁非 ASCII 路径——
    已知限制，出片文件名避免中文。）
 
-**未支持/已知偏差（留待第二阶段或永久记录）**：
-- `--layout field`、`--groups auto`（js/layout.mjs layoutField）与
-  PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes——gen 第二阶段对象；
+**已知偏差（永久记录）**：
 - `Math.tan`/strtod 与 V8 可能差 1 ulp（影响 fit_width 最末位小数）；
 - `localeCompare` 平局退化为码点序；
 - strtod 接受 `"inf"` 而 JS `Number("inf")` 为 NaN（LRC 数值解析边界）。
@@ -452,3 +448,61 @@ vendored 依赖（json.hpp/earcut.hpp/stb_truetype.h/stb_image_write.h）经
 git 按相似度记 rename）；新增 `chamina.h` / `chamina_cli.cpp` /
 `example/main.cpp`；拆分源料 `tmp/split.cjs` + `tmp/chamina_head.txt` +
 `tmp/chamina_api.inc`（不入库）。
+
+
+## 十四、gen 第二阶段：`--layout field` / `--groups auto`（2026-10-28，字节级对齐完成）
+
+**目标**：接管 gen 剩余旗标——`--layout field`（js/layout.mjs 741 行的
+layoutField）、`--groups auto`（js/lrc.js wordGroups/groupCharTimes）、
+`--roll-power`（whip）、`--force-whip`、`--energy-file`（loadEnergy）。
+实现在 chamina.h gen 节（field 组约 600 行）。
+
+**对齐要点**（全部 double 精度——输出是场景 JSON，必须与 node
+JSON.stringify 逐字节一致；与渲染端的 float 管线不同）：
+- **wordGroups**：WORD_SPLIT_SPECS 20 条手写分词（'|' 分隔，尾随空格
+  随前词）；PHRASE_CUTS 15 种节拍函数（thirds/chunks 复刻）；短语在空格后
+  切；PHRASE_CUT_OVERRIDES 仅 0:0→表[3]、0:1→表[12]（kind 字段仍记公式
+  值）；seed % 15 的 kind 与 `(seed*5+phraseIndex*3) % 15` 公式逐字。
+- **groupCharTimes**：组内扫掠 35ms（`g.t + (i-i0)*0.035`）。
+- **layoutField**：serpentine GRID{5,30,15}（row0 从中列向右）；STAGES 7 帧
+  循环；boxW/H 按 emWidth（space 0.2959，余 1em）×size 与 fitWidth 解析；
+  rLo/rHi = base±1.3（下限 11.6）；revealEnd=末戳（groups 时=末组 t+
+  (n-1)*0.035）；flightAt/Dur（gap*0.45 上限 min(14, gap-0.4) 与
+  TRAVEL_MAX=2，i=0 钳 titleOut、i>0 钳 prevCue+0.8，再钳 cue-0.4）；
+  framingFits 四角投影 0.93/0.94 门（roll 盒膨胀）；slot = P −
+  (sx·fw·right + sy·fh·up)；FLY_YAW/ROLL 交替签名，不合则收平。
+- **whip**：flight whip 门（e<0.52 或 dur<1.0 或 rng<0.22 拒，**r() 只在
+  `!forced` 时消耗**——JS && 短路流对齐）；flightWhip = π/2·(0.8+0.2r)·
+  min(whip,1)·(0.72+0.28e)；三停结构（ease_in_quad 甩入 → back_out 飞行
+  过冲 → ease_out_quad 回平，settleClamp = min(0.55, max(0.12, gap-0.88),
+  backAt-(cue+0.08)-0.02)）；词内 whip 门（e≥0.78 或 i=0 或 forced，组>2，
+  最宽词距 ≥1.0，i=0 用 π/2·(0.85+0.1r) 否则 0.5+0.35r）；whipSign 全局
+  交替且**只在实际放置时消耗**。
+- **choreo**：rng（mulberry 风格 0x6d2b79f5，Math.imul 无符号 mod 2^32 复刻
+  ——`t ^= t + imul(...)` 的 JS 浮点加进位由 mod 2^32 吸收）；MOVES 12 键
+  按对象序索引；rollMove 幅度带（roll 0.05-0.16 / yaw 0.07-0.20 /
+  r 0.5-1.5 / e 0.02-0.07 / pan 0.06-0.15）；assignChoreo 签名去重（盐
+  rng(i·7919+salt·104729+17)，80 次上限，退回 rollChoreo(k,i+1)），第 0 行
+  OPENING_PREFIX（down 0.34/ease_out_quad/lead−0.12/pace 0.85 + up 0.13/
+  smooth + right 0.31/ease_in_out_cubic）占前 need 个 between 位；
+  六次减半预算 + 退化丢弃；deadline = flightAt[i+1] 或 backAt。
+- **exits**：相机路径整体（rig+stops）逐 0.1s 步进扫描（浮点累加与 JS
+  相同序列），boxOnFrame（眼后角容忍、全眼后即出画）；from = max(cue+
+  fadeIn+0.15, revealEnd+0.15, lineEnd+0.15)；尾停 backDur≥0.4 时回题景
+  （yaw/roll 强制 0）。
+- **loadEnergy**：envelope mean band（cue−0.8..cue+1.5，Math.round 帧界），
+  min-max 归一 round3；错误行为与第一阶段 check_energy_file 相同
+  （--energy-file: … has no envelope data），故该函数删除。
+- **buildLyricTexts**：--groups auto 时 charTimes 先 groupCharTimes 再
+  round3；texts 覆盖（position/exits）在 palette/keep-open/outro **之前**
+  （键序与覆盖语义同 JS）。
+
+**验证（全部字节级，node spawnSync UTF-16 通道）**：bird.lrc 8 组合
+（field / field+groups / field+groups+whip+energy / +force-whip / groups
+单用 / field+entrance fall+jitter / field+keep-open / field+outro-at）、
+sample.lrc 4 组合（field / +groups / +whip / +outro）、keep-camera+field
+（模板 stops 被 layout 输出替换）——**13/13 字节级一致**；energy-file
+空数据与缺文件错误路径 exit 1 且消息一致；single 布局回归逐字节不变；
+field 场景经 C++ 渲染端实渲 t=20 与 whip 段 t=8.4 两张静帧无崩溃
+（stops=34 = 33 行 + 收尾回题景）；渲染端门禁 t=8 四分数与 fuzz 48/48
+复验无变化。

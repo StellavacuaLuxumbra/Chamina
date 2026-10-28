@@ -28,7 +28,7 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
 ## 0a. ✅ lrc2scene 已移植为 `chamina-cpp gen`（2026-10-28）
 
 **Node 的 lrc2scene 依赖已甩掉一半**：LRC → 场景 JSON 生成链移植进
-`cpp/src/chamina.cpp`（gen 节 ~950 行），入口 `chamina-cpp gen <lrc> -o out.json`。
+`cpp/src/chamina.h`（gen 节，~1500 行），入口 `chamina-cpp gen <lrc> -o out.json`。
 
 - **对齐标准**：与 `node js/lrc2scene.mjs` 的 `JSON.stringify(scene, null, 2)`
   输出**字节级一致**。方法：`nlohmann::ordered_json` 保 JS 键插入序 +
@@ -37,9 +37,11 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
   详见 `docs/cpp-migration.md` §十。
 - **已验证**：自写测试 LRC + 14 组 flag 组合全部字节级一致；真实语料
   `scenes/bird.lrc`、`scenes/sample.lrc` 字节级一致（0 失败）。
-- **未支持**（明确拒绝并提示用 node）：`--layout field`、`--groups auto`
-  （js/layout.mjs，第二阶段）；`--roll-power`/`--force-whip` 单布局下
-  no-op；`--energy-file` 校验后忽略。
+- **第二阶段已补齐（同日，见 cpp-migration §十四）**：`--layout field` /
+  `--groups auto`（js/layout.mjs layoutField + js/lrc.js wordGroups）、
+  `--roll-power`（whip）、`--force-whip`、`--energy-file`（loadEnergy）——
+  bird 8 组合 + sample 4 组合 + keep-camera 1 组合，13/13 字节级一致。
+  gen 至此**全量接管** node lrc2scene。
 - **gen 渲染回归**：argv UTF-8 重解码 + u8path + PNG to_func 改动后，
   新旧二进制同刻 A/B t=8 与 t=20.35 全区比值 1.000；20 帧视频段管道正常。
 
@@ -126,9 +128,9 @@ main+参数解析，编译出同一个 `dist/chamina-cpp.exe`。
 3. **C++ 单头库（`cpp/src/chamina.h`，chamina-cpp.exe 为其 CLI 薄壳，
    ~5.9 fps，主交付）**
 
-此外 `chamina-cpp gen` 已接管 lrc2scene、`chamina-cpp audio` 已接管
-audio-env（见 §0a/§0b）；Node 仅剩 editor，以及 gen 第二阶段的
-`--layout field`（js/layout.mjs）。
+此外 `chamina-cpp gen` 已全量接管 lrc2scene（含 --layout field /
+--groups auto / whip，见 §0a）、`chamina-cpp audio` 已接管 audio-env
+（见 §0b）；Node 仅剩 editor。
 
 ## 2. 构建与验收（每次改动的标准流程）
 
@@ -259,9 +261,9 @@ dist/chamina-example.exe 嵌入示例产物
 tmp/split.cjs          一次性拆分工具（源料 tmp/chamina_head.txt、tmp/chamina_api.inc；
                        chamina.cpp 已删，此后 chamina.h 即唯一直接编辑的引擎源）
 src/native/            Rust 参考实现（对照验收用）
-js/                    作者工具链——lrc2scene、audio-env 已 C++ 化（gen/audio
-                       子命令）；未 C++ 化：editor、layout.mjs（gen --layout field）
-docs/cpp-migration.md  全部决策与实施记录（§一~§十三）
+js/                    作者工具链——lrc2scene（含 layout.mjs）、audio-env 已全部
+                       C++ 化（gen field/groups/whip 全量）；未 C++ 化：editor
+docs/cpp-migration.md  全部决策与实施记录（§一~§十四）
 docs/session-summary.md §十二~§十四（v10 特效、Rust/C++ 落地）
 scenes/bird.json       主测试场景（30fps/11010 帧/314 相机 stop/34 背景键）
 scenes/bird.lrc        gen 的真实语料（与 node 版字节级一致）
@@ -275,10 +277,9 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    LUT、文字块预剔除；回归全部像素级零漂移，见 §3 表）。剩余项见 §3 待做。
 3. 功能缺口（对照 JS 版逐一移植）：
    - ~~`lrc2scene` → `chamina-cpp gen`~~（**已完成**，2026-10-28，single
-     布局默认路径字节级一致，见 §0a 与 cpp-migration §十）。第二阶段可选：
-     `--layout field` / `--groups auto`（需读 js/layout.mjs 741 行 +
-     PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes；测试向量在
-     js/layout.test.mjs / js/lrc.test.mjs）；
+     布局默认路径字节级一致，见 §0a 与 cpp-migration §十；第二阶段
+     `--layout field` / `--groups auto` / whip 全量也已补齐，见 §十四——
+     gen 至此全量接管 node lrc2scene）；
    - ~~`audio-env` → `chamina-cpp audio`~~（**已完成**，2026-10-28，见 §0b：
      ffmpeg 解码 + 手写同构 FFT，输出字节级一致，零新 vendored 库）；
    - editor（Web GUI）——低优先级。
@@ -286,11 +287,9 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    cpp-migration §十二）。
    ~~单头库化 chamina.h~~（**已完成**，2026-10-28，见 §0d 与 cpp-migration
    §十三）。Phase 2 可选：完全自包含 amalgamation（vendored 依赖内联进
-   chamina.h，生成脚本检查入仓）。**下一个：gen 第二阶段**——
-   `--layout field` / `--groups auto`（读 js/layout.mjs 741 行的 layoutField +
-   PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes；测试向量在
-   js/layout.test.mjs / js/lrc.test.mjs）。可选自动化长跑：随机字节 LRC 语料。
-5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十二 与本文件。
+   chamina.h）。可选自动化长跑：随机字节 LRC 语料（fuzz 面：field 布局的
+   词组切分 + whip 消耗流）。
+5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十四 与本文件。
 
 ## 8. 用户偏好（长期有效）
 

@@ -62,7 +62,11 @@ int main() {
 chamina-cpp gen scenes\bird.lrc -o scenes\bird.json
 chamina-cpp gen scenes\bird.lrc -o scenes\bird.json ^
   --entrance fall --jitter 0.4 --title "标题" --palette "0xff88cc,#66ddff"
-:: 不支持的：--layout field、--groups auto（提示改用 node js/lrc2scene.mjs）
+
+:: field 布局（蛇形世界位 + 每词相机停 + 按音频能量甩镜）——已全量移植
+chamina-cpp gen scenes\bird.lrc -o scenes\bird.json ^
+  --layout field --groups auto --roll-power 0.7 ^
+  --energy-file target\chamina\audio_env.json --force-whip "遥远飞行"
 
 :: 音轨 → 频谱包络（audio-env 的 C++ 移植，输出与 node 版字节级一致）
 chamina-cpp audio gift.mp3 -o target\chamina\audio_env.json
@@ -80,9 +84,10 @@ chamina-cpp scenes\bird.json --still 20.35 --png frame.png
 `--audio-env` 是 `js/audio-env.mjs` 产出的频谱包络，给了才有频谱环/频谱条/
 火花/粒子呼吸（未给时这些组件静默关闭，其余一切照常）。
 
-gen 支持与 node 版相同的 CLI（entrance/jitter/wave/shake/palette/fx/
-标题副题片尾卡/相机运动/fit-width/offset/duration/fps/tail 等，详见
-`--help`）；已知偏差与未支持项见 `docs/cpp-migration.md` §十/§十一。
+gen 支持与 node 版**相同且全量**的 CLI（entrance/jitter/wave/shake/
+palette/fx/标题副题片尾卡/相机运动/fit-width/offset/duration/fps/tail、
+--layout field/--groups auto/--roll-power/--force-whip/--energy-file，
+详见 `--help`）；已知偏差（1 ulp 级）见 `docs/cpp-migration.md` §十/§十四。
 
 ### 运行时开关（环境变量）
 
