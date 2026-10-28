@@ -84,16 +84,22 @@ gen LRC 边界 26），harness 判定 exit∈{0,1}=清，其余=崩。
 
 ## 0d. ✅ 单头库化：`chamina.h`（stb 风格）+ 薄壳 CLI（2026-10-28）
 
-最终交付形态落地：**`cpp/src/chamina.h` 单头库**（~4800 行，stb 风格）。
-宿主 C++ 工程在一个 `.cpp` 里 `#define CHAMINA_IMPLEMENTATION` 后 include
-即可渲染；`cpp/src/chamina_cli.cpp`（~120 行薄壳）= 旧 `chamina.cpp` 的
-main+参数解析，编译出同一个 `dist/chamina-cpp.exe`。
+最终交付形态落地：**`cpp/src/chamina.h` 单头库**（~5900 行，stb 风格；
+gen 第二阶段后）。宿主 C++ 工程在一个 `.cpp` 里 `#define
+CHAMINA_IMPLEMENTATION` 后 include 即可渲染；`cpp/src/chamina_cli.cpp`
+（~120 行薄壳）= 旧 `chamina.cpp` 的 main+参数解析，编译出同一个
+`dist/chamina-cpp.exe`。
 
 - **头文件结构**：banner/用法文档 → include 守卫（`CHAMINA_H_INCLUDE`）→
   `namespace chamina` 公共 API 声明 → `#ifdef CHAMINA_IMPLEMENTATION` →
   引擎体（原 chamina.cpp 第 16–4177 行**逐字**迁移）→ 公共 API 实现 → 两个
-  `#endif`。vendored 依赖经 `-Icpp/vendor` 解析（完全自包含 amalgamation
-  是 Phase 2）。
+  `#endif`。vendored 依赖经 `-Icpp/vendor` 解析。
+- **✅ Phase 2 amalgamation 已完成**（同日，见 cpp-migration §十三）：
+  `node cpp/tools/amalgamate.cjs` 产出 `dist/chamina.h`（38,719 行，确定性
+  生成），4 个 vendored 头逐字内联——宿主工程只需**一个文件**。验证 9/9：
+  活代码零引号 include（stb_truetype `#if 0` 示例块的 2 处自 include
+  inert，接受）；单文件拖进普通目录即可编译 example 与 CLI 薄壳，出图与
+  金标准逐字节相等；仅声明 TU 双 TU 用法成立。dist/ 不入库，按需再生成。
 - **公共 API**（`namespace chamina`）：`Engine`（不透明；持有 scene/meta
   拷贝 + World + FontEngine + w/h/fps/total）、`engine_create(scene_json,
   audio_env_json, err, err_cap)`（不抛异常，失败填 err 返回 nullptr）、
@@ -286,9 +292,10 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
 4. ~~崩溃/边界 fuzz 第一轮~~（**已完成**，2026-10-28，48 例全清，见 §0c 与
    cpp-migration §十二）。
    ~~单头库化 chamina.h~~（**已完成**，2026-10-28，见 §0d 与 cpp-migration
-   §十三）。Phase 2 可选：完全自包含 amalgamation（vendored 依赖内联进
-   chamina.h）。可选自动化长跑：随机字节 LRC 语料（fuzz 面：field 布局的
-   词组切分 + whip 消耗流）。
+   §十三）。~~Phase 2：完全自包含 amalgamation~~（**已完成**，2026-10-28：
+   `cpp/tools/amalgamate.cjs` → dist/chamina.h 38,719 行，验证 9/9，见
+   cpp-migration §十三）。可选自动化长跑：随机字节 LRC 语料（fuzz 面：
+   field 布局的词组切分 + whip 消耗流）。
 5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十四 与本文件。
 
 ## 8. 用户偏好（长期有效）

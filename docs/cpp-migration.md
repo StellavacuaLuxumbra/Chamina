@@ -377,9 +377,9 @@ terminate（0xC0000409）。gen 端 26 例首轮即全清。修复后 **48/48 �
 ## 十三、单头库化 `chamina.h`（2026-10-28，stb 风格交付形态落地）
 
 **决策**：最终交付形态从「单 TU 的 exe」升级为「单头库 + 薄壳 CLI」。
-`cpp/src/chamina.h`（~4800 行，stb 风格）= 引擎全部；`chamina_cli.cpp`
-（~120 行）= 旧 main + 参数解析，include 头文件后编译出同一个
-`dist/chamina-cpp.exe`。渲染公式零改动。
+`cpp/src/chamina.h`（stb 风格；gen 第二阶段后约 5900 行）= 引擎全部；
+`chamina_cli.cpp`（~120 行）= 旧 main + 参数解析，include 头文件后编译出
+同一个 `dist/chamina-cpp.exe`。渲染公式零改动。
 
 **头文件结构**（一次性生成器 `tmp/split.cjs` 从 chamina.cpp 拼装；源文件
 已删，此后 **chamina.h 即唯一直接编辑的引擎源**，改动直接落在头文件里）：
@@ -391,7 +391,8 @@ terminate（0xC0000409）。gen 端 26 例首轮即全清。修复后 **48/48 �
 4. 公共 API 实现（原 main/render_main 的迁移，见下）；
 5. 两个 `#endif`（IMPLEMENTATION / include 守卫）。
 vendored 依赖（json.hpp/earcut.hpp/stb_truetype.h/stb_image_write.h）经
-`-Icpp/vendor` 解析；完全自包含 amalgamation（依赖内联进头文件）是 Phase 2。
+`-Icpp/vendor` 解析；完全自包含 amalgamation（依赖内联进头文件）见本节末
+Phase 2 记录。
 
 **公共 API**（`namespace chamina`）：
 - `struct Engine` 不透明；实现里持有 `scene`/`meta` 拷贝（`PreparedText::
@@ -448,6 +449,29 @@ vendored 依赖（json.hpp/earcut.hpp/stb_truetype.h/stb_image_write.h）经
 git 按相似度记 rename）；新增 `chamina.h` / `chamina_cli.cpp` /
 `example/main.cpp`；拆分源料 `tmp/split.cjs` + `tmp/chamina_head.txt` +
 `tmp/chamina_api.inc`（不入库）。
+
+**Phase 2（2026-10-28，amalgamation 完成，`dist/chamina.h` 完全自包含）**：
+
+- **工具**：`cpp/tools/amalgamate.cjs`（入仓库）——把 4 个 vendored 头
+  （nlohmann/json 21,595 行 + mapbox/earcut 1,031 + stb_truetype 4,490 +
+  stb_image_write 1,520）逐字内联进 src 头对应 `#include "…"` 的位置，
+  产出 `dist/chamina.h`（38,719 行，生成**确定性**——同输入重跑 MD5 相同）。
+  dist/ 不入库，按需再生成。
+- **行尾**：chamina.h 是混合行尾文件（banner/API 半 LF、引擎体 CRLF），
+  工具按 `split('\n')` 保留行尾 `\r` 处理，splice/join 字节无损。
+- **验证**（`tmp/amalgam_check.mjs`，9/9 绿）：
+  1. 活代码零引号 include——扫描带条件编译嵌套跟踪，仅剩 stb_truetype.h
+     `#if 0` 示例程序块内的 2 处自 include（`#if 0` 内的 `#include`
+     预处理期不展开，inert；vendored 文件保持逐字内联，接受）；
+  2. 单文件拖进普通宿主目录（tmp/amalgam/，无 -Icpp/vendor、无 -Icpp/src），
+     `cpp/example/main.cpp` 与 `chamina_cli.cpp` **均编译通过**（注意：
+     引号 include 先搜包含者目录——宿主 TU 必须与头文件同目录或用 -I
+     指向它，否则会被 cpp/src/chamina.h 遮蔽）；
+  3. 两者出图与金标准逐字节相等（example t=20.35、CLI t=8）；
+  4. 仅声明 TU（api_only.cpp，include 不定义 IMPLEMENTATION）对 amalgam
+     编译通过——stb 双 TU 用法成立。
+- **交付语义**：宿主工程只需一个 `chamina.h` + 自家一个 TU；src 头
+  （+ cpp/vendor）仍是在编辑的开发形态。
 
 
 ## 十四、gen 第二阶段：`--layout field` / `--groups auto`（2026-10-28，字节级对齐完成）

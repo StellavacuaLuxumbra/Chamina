@@ -4,7 +4,7 @@
 软件光栅、全套音频可视化、后处理、视频编码管道，以及 LRC → 场景 JSON
 （`gen`）与音轨 → 频谱包络（`audio`）两个子命令**。
 
-交付形态是 **stb 风格单头库 `src/chamina.h`**（约 4800 行）+ 四个 vendored
+交付形态是 **stb 风格单头库 `src/chamina.h`**（约 5900 行）+ 四个 vendored
 单头库。宿主 C++ 工程在一个 `.cpp` 里 `#define CHAMINA_IMPLEMENTATION`
 后 include 即可渲染；`src/chamina_cli.cpp` 是库之上的薄壳命令行（本目录的
 构建产物）。不依赖 Rust、不依赖 Node、不依赖浏览器、不依赖 GPU——同一份
@@ -19,6 +19,20 @@ cpp\build.bat          → dist\chamina-cpp.exe（CLI 薄壳，静态链接，�
 
 要求：MinGW-w64 g++（仓库既有 D:\mingw64）。依赖全部在 `vendor/`：
 nlohmann/json、stb_truetype、mapbox/earcut.hpp、stb_image_write。
+
+## 完全自包含版（amalgamation）
+
+不想带 `vendor/` 目录的话，一条命令产出**零依赖**单文件（仅 C++ 标准库）：
+
+```bat
+node cpp\tools\amalgamate.cjs   → dist\chamina.h（约 38,700 行，确定性生成）
+```
+
+四个 vendored 头被逐字内联进 `src/chamina.h` 的 include 位置；把
+`dist\chamina.h` 单个文件拖进宿主工程、在自家一个 `.cpp` 里定义
+`CHAMINA_IMPLEMENTATION` 后 include，与 src 版行为逐字节一致（已验证：
+example 与 CLI 薄壳均编译通过，出图与金标准相等；stb 双 TU 用法同样成立）。
+**改代码请改 `src/chamina.h`，再重新生成——不要手编 dist 产物。**
 
 ## 当库用（嵌入宿主工程）
 
