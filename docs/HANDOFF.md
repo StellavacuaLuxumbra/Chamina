@@ -25,6 +25,24 @@ text 1.030 / full 1.020；t=20.35 full 1.026；t=325 full 0.989。
 （历史记录里 t=20.35 全区 0.970 是当时另一套临时采样约定，旧二进制在
 region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，不与旧约定值比。）
 
+## 0a. ✅ lrc2scene 已移植为 `chamina-cpp gen`（2026-10-28）
+
+**Node 的 lrc2scene 依赖已甩掉一半**：LRC → 场景 JSON 生成链移植进
+`cpp/src/chamina.cpp`（gen 节 ~950 行），入口 `chamina-cpp gen <lrc> -o out.json`。
+
+- **对齐标准**：与 `node js/lrc2scene.mjs` 的 `JSON.stringify(scene, null, 2)`
+  输出**字节级一致**。方法：`nlohmann::ordered_json` 保 JS 键插入序 +
+  自写 `js_dtoa`（ECMAScript Number→String，最短往返、1e21/1e-7 指数阈值）
+  + 自写 `js_json` 序列化器（不用 nlohmann dump——它打 `"14.0"` 而 JS 打 `"14"`）。
+  详见 `docs/cpp-migration.md` §十。
+- **已验证**：自写测试 LRC + 14 组 flag 组合全部字节级一致；真实语料
+  `scenes/bird.lrc`、`scenes/sample.lrc` 字节级一致（0 失败）。
+- **未支持**（明确拒绝并提示用 node）：`--layout field`、`--groups auto`
+  （js/layout.mjs，第二阶段）；`--roll-power`/`--force-whip` 单布局下
+  no-op；`--energy-file` 校验后忽略。
+- **gen 渲染回归**：argv UTF-8 重解码 + u8path + PNG to_func 改动后，
+  新旧二进制同刻 A/B t=8 与 t=20.35 全区比值 1.000；20 帧视频段管道正常。
+
 ## 1. 使命与现状
 
 用户目标：**整个项目彻底 C++ 化（字体/排版/动画/渲染全重写）= 交付软件
@@ -34,7 +52,10 @@ region-cmp.mjs 下同样给 1.026——两代二进制一致即为无回归，�
 → 同一画面）：
 1. JS + 浏览器（`js/scene.js`，作者预览，Edge 156 已无法 headless 启动）
 2. Rust 软件光栅（`src/native`，chamina-native.exe，参考实现）
-3. **C++（`cpp/`，chamina-cpp.exe，主交付，2.7-3.7 fps）**
+3. **C++（`cpp/`，chamina-cpp.exe，主交付，~5.9 fps）**
+
+此外 `chamina-cpp gen` 已接管 lrc2scene（LRC → 场景 JSON，见 §0a）；
+Node 仅剩 audio-env 与 editor 未 C++ 化。
 
 ## 2. 构建与验收（每次改动的标准流程）
 
@@ -92,6 +113,9 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 | 6 | 老场景（gift/lyrics/effects）崩 | 硬访问 fx/bloom/dof/backgrounds/start_at | main 的 meta 归一化 + cues 收集容错 |
 | 7 | MinGW popen | `_popen` 不可用 | 用 POSIX `popen/pclose` |
 | 8 | （语义发现，非 bug）| blur 的水平 pass 写 tmp 后从不被读——两方参考实现（src/native/post.rs 与本文件）都只做垂直单轴模糊，金标准即此语义渲染。**保持一致，勿修**；修了反而偏离金标准。浏览器版（UnrealBloomPass）本就是另一实现，区域比值 0.97-1.03 已覆盖差异 | blur_into 跳过水平 pass（省一半模糊计算，像素不变）|
+| 9 | gen 报 unknown argument | argv 循环未跳过 `"gen"` token（分发入口自身） | main 的 gen 分支：跳过 argv[0]、argv[1] |
+| 10 | `[00:05.500]` 解析越界 | match_clock 带分数分支 len 公式多加 1（11 字节算出 12）→ substr 抛 | match_clock 小数分支：len = n + 1 + frac_len |
+| 11 | MinGW 编译 NOMINMAX 冲突 | windows.h 顺序敏感的重定义 | #ifndef NOMINMAX 守卫 |
 
 **对照语义的权威来源**：`js/anim.mjs`（相机/背景/命中包络）、
 `src/animation.rs`（字符动画）、`js/scene.js`（可视化/后处理公式）、
@@ -117,25 +141,42 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 - **build.bat 的冒烟行在本机 PowerShell→cmd 转发下会卡住**（无输出、
   15 分钟不返回；exe 直跑正常）。直接用 g++ 命令编译：
   `D:\mingw64\bin\g++.exe -O2 -std=c++17 -fopenmp -static -static-libgcc
-  -static-libstdc++ -Icpp/vendor cpp/src/chamina.cpp -o dist/chamina-cpp.exe`
-  （~2 分钟）。build.bat 本体待查（可能是 `2>&1 |` 管道 + cmd /c 的交互）。
+  -static-libstdc++ -Icpp/vendor cpp/src/chamina.cpp -o dist/chamina-cpp.exe
+  -lshell32`
+  （~2 分钟；-lshell32 是 CommandLineToArgvW 所需，缺了链接失败）。
+  build.bat 本体待查（可能是 `2>&1 |` 管道 + cmd /c 的交互）。
 - 读 PNG 用 `js/lum.mjs` / `js/preview.mjs`（本会话 Read 工具看图不可信，
   见 session-summary §二）。
+- **Windows 非 ASCII（gen 移植期修掉，勿回退）**：
+  1. argv 中文必挂——`main(char* argv[])` 拿到的是 ANSI codepage。已改
+     `GetCommandLineW` + `CommandLineToArgvW` + `WideCharToMultiByte(CP_UTF8)`
+     重解码（为此 build.bat 加 `-lshell32`，链接失败先查它）；
+  2. MinGW `ifstream(char*)` 走 ANSI codepage——文件读写一律
+     `filesystem::u8path(path)`（构造 fstream）；
+  3. stb_image_write 的窄路径 fopen 同理——静帧 PNG 已改
+     `stbi_write_png_to_func` + 宽路径写文件。
+- **仍存的编码限制**：ffmpeg 走 popen→cmd /c，输出文件名是中文时会损毁
+  （cmd 的非 ASCII 处理）——出片文件名避免中文；gen 的 JSON 写出已走
+  u8path 无此问题。
+- git 看得见 `nul.png` 幽灵文件而常规 API 看不见（NTFS 保留名）——用
+  `cmd /c del "\\.\F:\项目\Chamina\nul.png"` 删（本次已处理）。
 
 ## 6. 文件地图
 
 ```
 cpp/
-├─ build.bat           一键构建 + 冒烟
+├─ build.bat           一键构建 + 冒烟（需 -lshell32，见 §5）
 ├─ README.md           用法/开关/架构速览
-├─ src/chamina.cpp     全引擎（~2000 行单 TU；各节注释标明公式来源）
+├─ src/chamina.cpp     全引擎（~3900 行单 TU；含 gen 节 ~950 行；各节注释标明公式来源）
 └─ vendor/             nlohmann/json.hpp, stb_truetype.h, earcut.hpp, stb_image_write.h
-dist/chamina-cpp.exe   交付产物（静态，3.5MB）
+dist/chamina-cpp.exe   交付产物（静态，4.7MB；gen 渲染二合一）
 src/native/            Rust 参考实现（对照验收用）
-js/                    作者工具链（lrc2scene/audio-env/editor）——未 C++ 化
-docs/cpp-migration.md  全部决策与实施记录（§一~§八）
+js/                    作者工具链——lrc2scene 已 C++ 化（gen 子命令）；未 C++ 化：
+                       audio-env、editor、layout.mjs（gen --layout field）
+docs/cpp-migration.md  全部决策与实施记录（§一~§十）
 docs/session-summary.md §十二~§十四（v10 特效、Rust/C++ 落地）
 scenes/bird.json       主测试场景（30fps/11010 帧/314 相机 stop/34 背景键）
+scenes/bird.lrc        gen 的真实语料（与 node 版字节级一致）
 target/chamina/        audio_env.json、native_*.png 金标准、场景备份
 ```
 
@@ -145,13 +186,19 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
 2. ~~§3 的「待做优化」1/3/4~~（已完成：blur 静态缓冲+死代码跳过、ACES fit
    LUT、文字块预剔除；回归全部像素级零漂移，见 §3 表）。剩余项见 §3 待做。
 3. 功能缺口（对照 JS 版逐一移植）：
-   - `lrc2scene` 的场景生成链（LRC 解析/词组/甩镜布局/调色板）→ 做成
-     `chamina-cpp gen` 子命令，彻底甩掉 Node；
-   - `audio-env`（miniaudio 解码 + pocketFFT）→ `chamina-cpp audio` 子命令；
+   - ~~`lrc2scene` → `chamina-cpp gen`~~（**已完成**，2026-10-28，single
+     布局默认路径字节级一致，见 §0a 与 cpp-migration §十）。第二阶段可选：
+     `--layout field` / `--groups auto`（需读 js/layout.mjs 741 行 +
+     PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes；测试向量在
+     js/layout.test.mjs / js/lrc.test.mjs）；
+   - **下一个：`audio-env` → `chamina-cpp audio`**（读 js/audio-env.mjs
+     理解谱包络生成；解码用 miniaudio、FFT 用 pocketFFT，输出
+     audio_env.json 兼容 `--audio-env`）；
    - editor（Web GUI）——低优先级。
-4. 崩溃/边界 fuzz：空 texts、无 camera_animation、超长行、单字场景、
-   depth=0.001、fit_width=0——都应不崩（老场景兼容模式已开路）。
-5. 每完成一个大项，更新 `docs/cpp-migration.md` §八/§九 与本文件。
+4. 崩溃/边界 fuzz：gen 的 LRC 解析器是首选 fuzz 对象（空文件/截断时钟/
+   超长行/非法 UTF-8）；渲染端老项——空 texts、无 camera_animation、
+   单字场景、depth=0.001、fit_width=0——都应不崩（老场景兼容模式已开路）。
+5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十 与本文件。
 
 ## 8. 用户偏好（长期有效）
 

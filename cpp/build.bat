@@ -19,7 +19,7 @@ if not exist dist mkdir dist
 
 echo [build] %GXX% -O2 -std=c++17 -fopenmp -static -Icpp/vendor cpp/src/chamina.cpp
 %GXX% -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ ^
-  -Icpp/vendor cpp/src/chamina.cpp -o dist/chamina-cpp.exe || exit /b 1
+  -Icpp/vendor cpp/src/chamina.cpp -o dist/chamina-cpp.exe -lshell32 || exit /b 1
 
 echo [build] ok -^> dist\chamina-cpp.exe
 dist\chamina-cpp.exe 2>&1 | findstr /C:"usage" >nul || (echo [build] smoke test failed & exit /b 1)

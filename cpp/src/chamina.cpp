@@ -38,6 +38,19 @@ static bool TRACE = false;
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+// argv arrives in the ANSI codepage via cmd.exe; scene paths and text flags
+// are UTF-8 inside the engine, so re-decode once at startup.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -1952,8 +1965,1800 @@ static float mat_outline_width(const json& spec) {
 }
 
 // ---------------------------------------------------------------------------
-// main
+// gen: LRC → scene JSON (port of js/lrc.js + js/lrc2scene.mjs)
+//
+//   chamina-cpp gen song.lrc -o song.json [flags like node js/lrc2scene.mjs]
+//
+// Covers the single-layout default path: LRC parsing (incl. {e:...} line tags
+// and <mm:ss.xx> word-timed stamps), entrance/fade/jitter/wave text blocks,
+// title & outro cards, orbit retune, camera move/shake, background looks and
+// cuts, the fx rack and the colour palette. --layout field / --groups auto
+// (js/layout.mjs) are not ported yet and are rejected up front.
+//
+// Output aims at byte parity with node's JSON.stringify(scene, null, 2):
+// numbers print through js_dtoa (ECMAScript Number→String rules), keys keep
+// JS insertion order (ordered_json), and template floats like "1.0" print
+// as "1" the way JS sees them. Known deviations: Math.tan/strtod may differ
+// from V8 by 1 ulp (fit_width), and localeCompare ties fall back to codepoint
+// order.
 // ---------------------------------------------------------------------------
+
+using ojson = nlohmann::ordered_json;
+
+// JS Math.round: half rounds toward +Infinity (floor(x+0.5)); std::round
+// rounds half away from zero and would disagree on negatives.
+static double js_round(double x) { return floor(x + 0.5); }
+static double round3(double v) { return js_round(v * 1000.0) / 1000.0; }
+
+static double js_max(double a, double b) {
+    if (isnan(a) || isnan(b)) return numeric_limits<double>::quiet_NaN();
+    return a > b ? a : b;
+}
+static double js_min(double a, double b) {
+    if (isnan(a) || isnan(b)) return numeric_limits<double>::quiet_NaN();
+    return a < b ? a : b;
+}
+
+// One UTF-8 codepoint at i (invalid bytes pass through as themselves).
+static uint32_t utf8_cp(const string& s, size_t i, size_t& len) {
+    unsigned char b = (unsigned char)s[i];
+    len = 1;
+    if (b < 0x80) return b;
+    int extra = 0;
+    uint32_t cp = 0;
+    if ((b & 0xE0) == 0xC0) { extra = 1; cp = b & 0x1F; }
+    else if ((b & 0xF0) == 0xE0) { extra = 2; cp = b & 0x0F; }
+    else if ((b & 0xF8) == 0xF0) { extra = 3; cp = b & 0x07; }
+    else return b;
+    if (i + extra >= s.size()) return b;
+    for (int k = 1; k <= extra; k++) {
+        unsigned char c = (unsigned char)s[i + k];
+        if ((c & 0xC0) != 0x80) { len = 1; return b; }
+        cp = (cp << 6) | (c & 0x3F);
+    }
+    len = (size_t)extra + 1;
+    return cp;
+}
+
+// ECMAScript WhiteSpace + LineTerminator (what String.trim strips).
+static bool js_is_ws(uint32_t cp) {
+    switch (cp) {
+    case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x20:
+    case 0xA0: case 0x1680: case 0x2028: case 0x2029:
+    case 0x202F: case 0x205F: case 0x3000: case 0xFEFF:
+        return true;
+    }
+    return cp >= 0x2000 && cp <= 0x200A;
+}
+
+static string js_trim(const string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e) {
+        size_t l;
+        if (js_is_ws(utf8_cp(s, b, l))) b += l;
+        else break;
+    }
+    size_t end = b, i = b;
+    while (i < e) {
+        size_t l;
+        uint32_t cp = utf8_cp(s, i, l);
+        if (!js_is_ws(cp)) end = i + l;
+        i += l;
+    }
+    return s.substr(b, end - b);
+}
+
+// Regex-level \s (single codepoint) used by the tag matchers.
+static size_t js_ws_at(const string& s, size_t i) {
+    size_t l;
+    uint32_t cp = utf8_cp(s, i, l);
+    return js_is_ws(cp) ? l : 0;
+}
+
+static bool js_alpha(unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+static bool js_word(unsigned char c) {  // \w
+    return js_alpha(c) || (c >= '0' && c <= '9') || c == '_';
+}
+
+static string to_lower_ascii(string s) {
+    for (auto& c : s)
+        if (c >= 'A' && c <= 'Z') c += 32;
+    return s;
+}
+
+// JS Number(str): surrounding whitespace ignored, "" → 0, full-string float
+// syntax otherwise, else NaN. (strtod also accepts "inf"; JS only "Infinity"
+// — divergence confined to garbage input.)
+static double parse_num(const string& s) {
+    size_t b = 0, e = s.size();
+    while (b < e && isspace((unsigned char)s[b])) b++;
+    while (e > b && isspace((unsigned char)s[e - 1])) e--;
+    if (b == e) return 0.0;
+    string t = s.substr(b, e - b);
+    const char* c = t.c_str();
+    char* end = nullptr;
+    double v = strtod(c, &end);
+    if (end != c + t.size()) return numeric_limits<double>::quiet_NaN();
+    return v;
+}
+
+// JS optionals default to `null`; Number.isFinite(null) is false while
+// clamp(Number(null)) clamps 0 — both behaviours needed, so model the two
+// states instead of one sentinel.
+struct OptNum {
+    bool is_null;
+    double v;
+};
+static OptNum optn(double v) { return {false, v}; }
+static const OptNum OPT_NULL{true, 0.0};
+static bool opt_finite(const OptNum& o) { return !o.is_null && isfinite(o.v); }
+static bool opt_gt0(const OptNum& o) { return !o.is_null && o.v == o.v && o.v > 0; }
+// (args.x || 0)
+static double opt_num0(const OptNum& o) {
+    return (o.is_null || o.v != o.v || o.v == 0) ? 0.0 : o.v;
+}
+// JS clamp(): Number(v) — null → 0 (finite!), NaN → fallback.
+static double opt_clamp(const OptNum& o, double lo, double hi, double fb) {
+    if (o.is_null) return min(hi, max(lo, 0.0));
+    if (o.v != o.v) return fb;
+    return min(hi, max(lo, o.v));
+}
+// JS clampNum() in lrc.js has the same Number() semantics.
+static double clamp_num(double v, double fb, double lo, double hi) {
+    if (v != v) return fb;
+    return min(hi, max(lo, v));
+}
+
+// CLI options for `gen` — every JS-default `null` number is modelled as
+// OPT_NULL so Number.isFinite / clamp(Number(v)) behave exactly like node.
+struct GenArgs {
+    string input, out;
+    string templ = "scenes/gift.json";  // node resolves ROOT/scenes/gift.json
+    OptNum size = optn(1.4), y = optn(-0.4), depth = optn(0.09);
+    string color = "#ffffff";
+    OptNum strength = optn(1.6);
+    string outline;
+    OptNum outline_width = optn(0.02);
+    OptNum bloom = optn(0.06);
+    string entrance = "slide";
+    string layout = "single", groups = "off";
+    OptNum jitter = OPT_NULL;
+    OptNum jitter_rot = optn(0), jitter_freq = optn(5);
+    bool jitter_hit = false;
+    OptNum jitter_hit_dur = optn(0.55);
+    OptNum wave = OPT_NULL;
+    OptNum wave_freq = optn(1.6), wave_spacing = optn(0.55);
+    bool wave_hit = false;
+    OptNum wave_hit_dur = optn(2.0);
+    OptNum dolly = OPT_NULL, crane = OPT_NULL, move_at = OPT_NULL, move_dur = OPT_NULL;
+    OptNum shake = OPT_NULL;
+    OptNum shake_roll = optn(0.008), shake_freq = optn(3.5);
+    bool shake_hit = false;
+    OptNum shake_hit_dur = optn(0.55);
+    OptNum fit_width = OPT_NULL;
+    OptNum offset = optn(0), fade_in = optn(0.3), fade_out = optn(0.45);
+    OptNum stagger = optn(0.04), tail = optn(3);
+    OptNum duration = OPT_NULL;
+    OptNum yaw_drift = optn(0.6), radius = OPT_NULL;
+    bool keep_camera = false, keep_open = false;
+    OptNum outro_at = OPT_NULL, outro_out = OPT_NULL;
+    string outro_text, outro_subtitle, outro_wish;
+    bool has_outro_text = false, has_outro_subtitle = false;
+    string bg_look;
+    vector<string> bg_cut;
+    OptNum bg_fade = optn(1.5);
+    bool fx = false;
+    OptNum fx_flash = OPT_NULL, fx_punch = OPT_NULL, fx_vignette = OPT_NULL,
+           fx_chromatic = OPT_NULL, fx_sat = OPT_NULL;
+    string palette;
+    OptNum roll_power = optn(0);
+    string energy_file;
+    vector<string> force_whip;
+    OptNum fps = OPT_NULL;
+    string title, subtitle;
+    OptNum title_in = optn(1.2), title_out = OPT_NULL, title_size = optn(3);
+    bool help = false;
+};
+
+static bool is_hex6(const string& s) {
+    if (s.size() != 7 || s[0] != '#') return false;
+    for (size_t i = 1; i < 7; i++) {
+        char c = s[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return false;
+    }
+    return true;
+}
+
+// The clock regex shared by line tags and glyph stamps:
+//   [< (1..3 digits) ':' (1..2 digits) [':'|'.' (1..3 digits)] >]
+// matched with real regex backtracking: a bounded digit run that overshoots
+// the terminator fails the whole match rather than truncating ("[00:16.1234]"
+// is not a time tag).
+static size_t digit_run(const string& s, size_t i) {
+    size_t n = 0;
+    while (i + n < s.size() && s[i + n] >= '0' && s[i + n] <= '9') n++;
+    return n;
+}
+static double digits_val(const string& s, size_t pos, size_t n) {
+    long long v = 0;
+    for (size_t i = 0; i < n; i++) v = v * 10 + (s[pos + i] - '0');
+    return (double)v;
+}
+static bool match_clock(const string& s, size_t pos, char open, char term,
+                        double& sec, size_t& len) {
+    if (pos >= s.size() || s[pos] != open) return false;
+    size_t run = digit_run(s, pos + 1);
+    if (!run) return false;
+    size_t mlen = 0;
+    for (size_t k = min(run, (size_t)3); k >= 1; k--)
+        if (pos + 1 + k < s.size() && s[pos + 1 + k] == ':') { mlen = k; break; }
+    if (!mlen) return false;
+    double minutes = digits_val(s, pos + 1, mlen);
+    size_t i = pos + 1 + mlen + 1;  // past ':'
+    size_t run2 = digit_run(s, i);
+    if (!run2) return false;
+    for (size_t k = min(run2, (size_t)2); k >= 1; k--) {
+        size_t j = i + k;
+        if (j >= s.size()) continue;
+        char c = s[j];
+        if (c == term) {
+            sec = minutes * 60.0 + digits_val(s, i, k);
+            len = j + 1 - pos;
+            return true;
+        }
+        if (c == '.' || c == ':') {
+            // The fraction can only be the full digit run after the separator;
+            // any shorter prefix ends on a digit, never the terminator.
+            size_t fr = digit_run(s, j + 1);
+            if (fr >= 1 && fr <= 3 && j + 1 + fr < s.size() && s[j + 1 + fr] == term) {
+                double frac = digits_val(s, j + 1, fr) / pow(10.0, (double)fr);
+                sec = minutes * 60.0 + digits_val(s, i, k) + frac;
+                len = j + 1 + fr + 1 - pos;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+struct LrcLine {
+    double time = 0;
+    string text;
+    bool has_tags = false;
+    map<string, string> tags;  // keys lowercased at parse, never serialized
+    bool has_ct = false;
+    vector<double> ct;         // one absolute time per codepoint
+};
+struct LrcParsed {
+    map<string, string> meta;
+    double offset_ms = 0;
+    vector<LrcLine> lines;
+};
+
+static bool match_meta(const string& s, string& key, string& value) {
+    // META_RE = /^\[([A-Za-z_][\w#-]*):(.*)\]\s*$/
+    if (s.size() < 3 || s[0] != '[') return false;
+    if (!(js_alpha((unsigned char)s[1]) || s[1] == '_')) return false;
+    size_t i = 2;
+    while (i < s.size() && (js_word((unsigned char)s[i]) || s[i] == '#' || s[i] == '-')) i++;
+    if (i >= s.size() || s[i] != ':') return false;
+    size_t close = s.rfind(']');
+    if (close == string::npos || close <= i) return false;
+    for (size_t k = close + 1; k < s.size(); k++)
+        if (!js_ws_at(s, k)) return false;
+    key = s.substr(1, i - 1);
+    value = s.substr(i + 1, close - i - 1);
+    return true;
+}
+
+// TAG_RE — leading {key:value} overrides, key lowercased, value trimmed.
+static bool match_tag(const string& s, string& key, string& val, size_t& len) {
+    if (s.empty() || s[0] != '{') return false;
+    size_t i = 1;
+    if (i >= s.size() || !(js_alpha((unsigned char)s[i]) || s[i] == '_')) return false;
+    i++;
+    while (i < s.size() && (js_word((unsigned char)s[i]) || s[i] == '-')) i++;
+    size_t j = i;
+    while (j < s.size()) {
+        size_t l = js_ws_at(s, j);
+        if (!l) break;
+        j += l;
+    }
+    if (j >= s.size() || (s[j] != ':' && s[j] != '=')) return false;
+    j++;
+    while (j < s.size()) {
+        size_t l = js_ws_at(s, j);
+        if (!l) break;
+        j += l;
+    }
+    size_t vs = j;
+    while (j < s.size() && s[j] != '{' && s[j] != '}') j++;
+    if (j >= s.size() || s[j] != '}') return false;
+    key = to_lower_ascii(s.substr(1, i - 1));
+    val = js_trim(s.substr(vs, j - vs));
+    len = j + 1;
+    return true;
+}
+
+static pair<map<string, string>, string> split_tags(const string& text) {
+    map<string, string> tags;
+    string rest = text;
+    string key, val;
+    size_t len;
+    while (match_tag(rest, key, val, len)) {
+        tags[key] = val;
+        rest = rest.substr(len);
+    }
+    return {move(tags), js_trim(rest)};
+}
+
+// splitGlyphTimes — word-timed LRC: <mm:ss.xx> stamps in front of a glyph or a
+// run of glyphs; characters inherit the last stamp, untagged text falls back
+// to the line cue.
+static void split_glyph_times(const string& src, double line_time, string& text,
+                              vector<double>& ct, bool& saw) {
+    size_t i = 0;
+    bool have_at = false;
+    double at = 0;
+    while (i < src.size()) {
+        double stamp;
+        size_t slen;
+        if (src[i] == '<' && match_clock(src, i, '<', '>', stamp, slen)) {
+            at = stamp;
+            have_at = true;
+            saw = true;
+            i += slen;
+            continue;
+        }
+        double when = have_at ? at : line_time;
+        if (src[i] == '<') {  // '.' matches the lone '<' as one unit
+            text += '<';
+            ct.push_back(when);
+            i += 1;
+            continue;
+        }
+        while (i < src.size() && src[i] != '<') {
+            size_t l;
+            utf8_cp(src, i, l);  // one entry per codepoint
+            text += src.substr(i, l);
+            ct.push_back(when);
+            i += l;
+        }
+    }
+}
+
+static LrcParsed parse_lrc(const string& src) {
+    LrcParsed p;
+    size_t pos = 0;
+    while (pos <= src.size()) {
+        size_t nl = src.find('\n', pos);
+        string raw = src.substr(pos, (nl == string::npos ? src.size() : nl) - pos);
+        pos = nl == string::npos ? src.size() + 1 : nl + 1;
+        string line = js_trim(raw);
+        if (line.empty()) continue;
+
+        // Collect every leading timestamp before deciding what this row is.
+        vector<double> times;
+        size_t rest_i = 0;
+        for (;;) {
+            double sec;
+            size_t len;
+            if (!match_clock(line, rest_i, '[', ']', sec, len)) break;
+            times.push_back(sec);
+            rest_i += len;
+        }
+        if (!times.empty()) {
+            // Strip a leading run of whitespace/colons (JS /^[\s:]+/), then the
+            // {…} overrides.
+            string body = line.substr(rest_i);
+            size_t lb = 0;
+            while (lb < body.size()) {
+                size_t l = js_ws_at(body, lb);
+                if (!l && body[lb] != ':') break;
+                lb += l ? l : 1;
+            }
+            body = js_trim(body.substr(lb));
+            auto [tags, text0] = split_tags(body);
+            string text;
+            vector<double> ct;
+            bool saw = false;
+            split_glyph_times(text0, times[0], text, ct, saw);
+            for (double t : times) {
+                LrcLine e;
+                e.time = t;
+                e.text = text;
+                if (!tags.empty()) {
+                    e.has_tags = true;
+                    e.tags = tags;
+                }
+                if (saw) {
+                    // A repeated stamp replays the same run on this copy's cue.
+                    e.has_ct = true;
+                    e.ct = ct;
+                    double shift = t - times[0];
+                    if (shift != 0)
+                        for (auto& v : e.ct) v += shift;
+                }
+                p.lines.push_back(move(e));
+            }
+            continue;
+        }
+
+        string mk, mv;
+        if (match_meta(line, mk, mv)) {
+            string key = to_lower_ascii(mk);
+            string value = js_trim(mv);
+            p.meta[key] = value;
+            if (key == "offset") {
+                double n = parse_num(value);
+                if (isfinite(n)) p.offset_ms = n;
+            }
+        }
+    }
+
+    // JS sorts with `a.time - b.time || a.text.localeCompare(b.text)`; the
+    // collation is locale-dependent, so exact ties (same timestamp) fall back
+    // to codepoint order here.
+    stable_sort(p.lines.begin(), p.lines.end(), [](const LrcLine& a, const LrcLine& b) {
+        if (a.time != b.time) return a.time < b.time;
+        return a.text < b.text;
+    });
+    return p;
+}
+
+static vector<LrcLine> apply_offset(const LrcParsed& p, bool has_given, double given) {
+    // applyOffset: shift = (Number(offsetMs) || 0) / 1000 — a positive
+    // [offset:+500] tag displays the lyrics 500 ms earlier.
+    double ms = has_given ? given : p.offset_ms;
+    double shift = (ms == ms && ms != 0 ? ms : 0.0) / 1000.0;
+    vector<LrcLine> out;
+    for (const auto& l : p.lines) {
+        LrcLine o;
+        o.time = l.time - shift;
+        o.text = l.text;
+        o.has_tags = l.has_tags;
+        o.tags = l.tags;
+        if (l.has_ct) {
+            o.has_ct = true;
+            for (double v : l.ct) o.ct.push_back(v - shift);
+        }
+        out.push_back(move(o));
+    }
+    return out;
+}
+
+static double suggest_duration(const vector<LrcLine>& lines, double tail) {
+    double last = lines.empty() ? 0.0 : lines.back().time;
+    return js_max(4.0, ceil(last + tail));
+}
+
+// ---------------------------------------------------------------------------
+// gen: entrances
+// ---------------------------------------------------------------------------
+
+static void check_entrance(const string& mode) {
+    static const char* ENTRANCES[] = {"none", "slide", "fall", "pop", "overshoot"};
+    for (const char* e : ENTRANCES)
+        if (mode == e) return;
+    throw runtime_error("unknown entrance \"" + mode + "\" (have: none, slide, fall, pop, overshoot)");
+}
+
+// The entrance for one line: its `{e:fall}` tag if present, else the
+// scene-wide default. A typo'd mode throws — a whole PV line would be off.
+static string line_entrance(const LrcLine& line, const string& fallback) {
+    if (!line.has_tags) return fallback;
+    auto it = line.tags.find("e");
+    if (it == line.tags.end() || it->second.empty()) return fallback;
+    string mode = to_lower_ascii(js_trim(it->second));
+    check_entrance(mode);
+    return mode;
+}
+
+// ---------------------------------------------------------------------------
+// gen: per-line colour palette (hexHsl / hslHex / applyPalette)
+// ---------------------------------------------------------------------------
+
+struct Hsl {
+    double h, s, l;
+};
+
+// #rrggbb → {h, s, l} in 0..1. Plain enough for tinting rims.
+static Hsl hex_hsl(const string& hex) {
+    string h = hex.empty() ? "#ffffff" : hex;
+    if (!h.empty() && h[0] == '#') h = h.substr(1);
+    long long n = 0;
+    for (size_t i = 0; i < min(h.size(), (size_t)6); i++) {
+        char c = h[i];
+        int d;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else break;  // parseInt stops at the first invalid character
+        n = n * 16 + d;
+    }
+    double r = ((n >> 16) & 255) / 255.0;
+    double g = ((n >> 8) & 255) / 255.0;
+    double b = (n & 255) / 255.0;
+    double mx = max(r, max(g, b)), mn = min(r, min(g, b));
+    double l = (mx + mn) / 2;
+    if (mx == mn) return {0, 0, l};
+    double d = mx - mn;
+    double s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    double hh;
+    if (mx == r) hh = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (mx == g) hh = ((b - r) / d + 2) / 6;
+    else hh = ((r - g) / d + 4) / 6;
+    return {hh, s, l};
+}
+
+static double hcl(double x) { return js_round(min(255.0, max(0.0, x)) * 255.0); }
+
+static double hue2rgb(double p, double q, double t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+    if (t < 1.0 / 2) return q;
+    if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+    return p;
+}
+
+static string rgb_hex6(int r, int g, int b) {
+    char buf[16];
+    snprintf(buf, sizeof buf, "#%06x", (r << 16) | (g << 8) | b);
+    return buf;
+}
+
+// {h, s, l} in 0..1 → #rrggbb.
+static string hsl_hex(double h, double s, double l) {
+    double H = fmod(fmod(h, 1.0) + 1.0, 1.0);
+    double S = min(1.0, max(0.0, s == s ? s : 0.0));
+    double L = min(1.0, max(0.0, l == l ? l : 0.0));
+    if (S == 0) {
+        int v = (int)hcl(L);
+        return rgb_hex6(v, v, v);
+    }
+    double q = L < 0.5 ? L * (1 + S) : L + S - L * S;
+    double p = 2 * L - q;
+    int r = (int)hcl(hue2rgb(p, q, H + 1.0 / 3.0));
+    int g = (int)hcl(hue2rgb(p, q, H));
+    int b = (int)hcl(hue2rgb(p, q, H - 1.0 / 3.0));
+    return rgb_hex6(r, g, b);
+}
+
+// Cycle a romantic palette across the lyric blocks; the rim follows each
+// line's tint, hue-shifted a little and pushed darker and more saturated.
+static void apply_palette(vector<ojson>& texts, const string& hexes) {
+    vector<string> pal;
+    size_t pos = 0;
+    while (pos <= hexes.size()) {
+        size_t c = hexes.find(',', pos);
+        string part = js_trim(hexes.substr(pos, (c == string::npos ? hexes.size() : c) - pos));
+        if (is_hex6(part)) pal.push_back(part);
+        if (c == string::npos) break;
+        pos = c + 1;
+    }
+    if (pal.empty())
+        throw runtime_error("--palette wants comma-separated #rrggbb values");
+    for (size_t i = 0; i < texts.size(); i++) {
+        const string& c = pal[i % pal.size()];
+        texts[i]["material"]["color"] = to_lower_ascii(c);
+        if (texts[i]["material"].contains("outline")) {
+            Hsl hs = hex_hsl(c);
+            texts[i]["material"]["outline"]["color"] =
+                hsl_hex(hs.h + 0.055, min(1.0, hs.s * 1.6 + 0.18), hs.l * 0.6);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// gen: frame width budget (visibleWidth)
+// ---------------------------------------------------------------------------
+
+// Full width of the text plane the camera can see, in world units — the
+// budget for fit_width so a line can never run off frame.
+static double visible_width(const ojson& scene, const ojson* cam_anim) {
+    static const ojson EMPTY_OBJ = ojson::object();
+    const ojson& cam = scene.contains("camera") ? scene["camera"] : EMPTY_OBJ;
+    const ojson& anim = cam_anim ? *cam_anim : EMPTY_OBJ;
+    double radius = 14.0;
+    if (anim.contains("radius") && anim["radius"].is_number()) {
+        double r = anim["radius"].get<double>();
+        radius = r != 0 ? r : 14.0;  // Number(anim.radius) || 14
+    }
+    if (anim.contains("movement") && anim["movement"].is_object()) {
+        const ojson& mv = anim["movement"];
+        if (mv.contains("radius_end") && mv["radius_end"].is_number()) {
+            double re = mv["radius_end"].get<double>();
+            if (isfinite(re)) radius = min(radius, re);
+        }
+    }
+    double fov = 0.8726646;
+    if (cam.contains("fov") && cam["fov"].is_number()) {
+        double f = cam["fov"].get<double>();
+        fov = f != 0 ? f : 0.8726646;
+    }
+    double w = 1920, h = 1080;
+    if (scene.contains("width") && scene["width"].is_number()) {
+        double v = scene["width"].get<double>();
+        w = v != 0 ? v : 1920;
+    }
+    if (scene.contains("height") && scene["height"].is_number()) {
+        double v = scene["height"].get<double>();
+        h = v != 0 ? v : 1080;
+    }
+    double aspect = w / h;
+    return 2.0 * tan(fov / 2.0) * radius * aspect;
+}
+
+// ---------------------------------------------------------------------------
+// gen: idle wobble (buildJitter) and karaoke bounce (buildWave)
+// ---------------------------------------------------------------------------
+
+static double num_or(const ojson& j, const char* key, double d) {
+    double v = j.value(key, d);
+    return isfinite(v) ? v : d;
+}
+
+// `jitter: 0.03` → one `jitter` animation for line i, phased so neighbouring
+// lines never wobble in lockstep. `delay` holds it back until the entrance
+// has settled. Returns null when absent or amplitude is zero.
+static ojson build_jitter(const ojson* jitter, int i, double t) {
+    if (!jitter) return ojson(nullptr);
+    const ojson& j = *jitter;
+    double a = num_or(j, "amplitude", 0.03);
+    double amp[3] = {a, a * 0.8, 0.0};
+    if (amp[0] == 0 && amp[1] == 0 && amp[2] == 0) return ojson(nullptr);
+    ojson out = ojson::object();
+    out["type"] = "jitter";
+    out["amplitude"] = ojson::array({round3(amp[0]), round3(amp[1]), round3(amp[2])});
+    out["frequency"] = round3(num_or(j, "frequency", 5.0));
+    out["rotation"] = round3(num_or(j, "rotation", 0.0));
+    out["phase"] = round3(i * 1.7);
+    out["start_at"] = round3(t + num_or(j, "delay", 0.4));
+    out["stagger"] = round3(num_or(j, "stagger", 0.0));
+    out["ramp"] = round3(num_or(j, "ramp", 0.5));
+    // Written only when asked for, so scenes without the flag stay identical.
+    if (j.value("hit", false)) {
+        out["hit"] = true;
+        out["hit_duration"] = round3(num_or(j, "hit_duration", 0.55));
+    }
+    return out;
+}
+
+// `wave: 0.2` → the karaoke bounce: each character trails the one before it
+// by `spacing` radians. Returns null when absent or amplitude is zero.
+static ojson build_wave(const ojson* wave, int i, double t) {
+    if (!wave) return ojson(nullptr);
+    const ojson& w = *wave;
+    double amp = num_or(w, "amplitude", 0.2);
+    if (amp == 0 || amp != amp) return ojson(nullptr);
+    (void)i;
+    ojson out = ojson::object();
+    out["type"] = "wave";
+    out["amplitude"] = round3(amp);
+    out["frequency"] = round3(num_or(w, "frequency", 1.6));
+    out["spacing"] = round3(num_or(w, "spacing", 0.55));
+    out["start_at"] = round3(t + num_or(w, "delay", 0.0));
+    out["ramp"] = round3(num_or(w, "ramp", 0.4));
+    if (w.value("hit", false)) {
+        out["hit"] = true;
+        out["hit_duration"] = round3(num_or(w, "hit_duration", 2.0));
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// gen: lyric text blocks (buildLyricTexts, single layout)
+// ---------------------------------------------------------------------------
+
+struct LyricOpts {
+    double size = numeric_limits<double>::quiet_NaN();  // clampNum → 1.5
+    double y = numeric_limits<double>::quiet_NaN();     // isfinite ? : -0.4
+    double depth = numeric_limits<double>::quiet_NaN(); // clampNum → 0.09
+    string color;
+    double strength = numeric_limits<double>::quiet_NaN();
+    double offset = numeric_limits<double>::quiet_NaN(); // isfinite ? : 0
+    double fade_in = numeric_limits<double>::quiet_NaN();
+    double fade_out = numeric_limits<double>::quiet_NaN();
+    double stagger = numeric_limits<double>::quiet_NaN();
+    double total = numeric_limits<double>::quiet_NaN();
+    string entrance;
+    double fit_width = numeric_limits<double>::quiet_NaN();
+    const ojson* jitter = nullptr;
+    const ojson* wave = nullptr;
+};
+
+static void push_entrance(ojson& anims, const string& entrance, double t, double stagger) {
+    // Entrance layers land before the fade in the array (JS unshifts); both
+    // share start_at so the line slides/drops in while it fades up.
+    if (entrance == "slide") {
+        ojson a = ojson::object();
+        a["type"] = "slide";
+        a["delta"] = ojson::array({-6.0, -2.5, 0.0});
+        a["duration"] = 0.7;
+        a["stagger"] = stagger * 1.5;
+        a["ease"] = "ease_out_quad";
+        a["start_at"] = t;
+        anims.push_back(move(a));
+    } else if (entrance == "fall") {
+        ojson a = ojson::object();
+        a["type"] = "fall";
+        a["duration"] = 0.7;
+        a["stagger"] = stagger * 1.5;
+        a["height"] = 1.4;
+        a["gravity"] = -3.0;
+        a["drift"] = 0.0;
+        a["wobble"] = 0.0;
+        a["start_at"] = t;
+        anims.push_back(move(a));
+    } else if (entrance == "pop") {
+        ojson a = ojson::object();
+        a["type"] = "pop";
+        a["duration"] = 0.5;
+        a["stagger"] = stagger * 1.5;
+        a["start_at"] = t;
+        a["from"] = 0.0;
+        a["ease"] = "back_out";
+        anims.push_back(move(a));
+    } else if (entrance == "overshoot") {
+        // Two layers on purpose: slide contributes position, pop scale.
+        // back_out overshoots, so each lands past its rest pose.
+        ojson a = ojson::object();
+        a["type"] = "slide";
+        a["delta"] = ojson::array({-7.0, -3.0, 0.0});
+        a["duration"] = 0.75;
+        a["stagger"] = stagger * 1.5;
+        a["ease"] = "back_out";
+        a["start_at"] = t;
+        anims.push_back(move(a));
+        ojson b = ojson::object();
+        b["type"] = "pop";
+        b["duration"] = 0.6;
+        b["stagger"] = stagger * 1.5;
+        b["start_at"] = t;
+        b["from"] = 0.0;
+        b["ease"] = "back_out";
+        anims.push_back(move(b));
+    }
+}
+
+static vector<ojson> build_lyric_texts(const vector<LrcLine>& lines, const LyricOpts& o) {
+    double size = clamp_num(o.size, 1.5, 0.2, 12);
+    double y = isfinite(o.y) ? o.y : -0.4;
+    double depth = clamp_num(o.depth, 0.09, 0.01, 2);
+    string color = o.color.empty() ? "#ffffff" : o.color;
+    double strength = clamp_num(o.strength, 1.6, 0, 64);
+    double offset = isfinite(o.offset) ? o.offset : 0.0;
+    double fade_in = clamp_num(o.fade_in, 0.3, 0, 10);
+    double fade_out = clamp_num(o.fade_out, 0.45, 0, 10);
+    double stagger = clamp_num(o.stagger, 0.04, 0, 1);
+    double total = o.total;  // NaN (JS null) when absent
+    string base_entrance = o.entrance.empty() ? "none" : o.entrance;
+    check_entrance(base_entrance);
+    // World-space width budget; Rust resolves it against real font metrics
+    // at export time, so we only say how much of the frame a line may use.
+    double fit = isfinite(o.fit_width) && o.fit_width > 0 ? o.fit_width
+                                                          : numeric_limits<double>::quiet_NaN();
+
+    vector<ojson> out;
+    int lyric_index = 0;
+    for (size_t i = 0; i < lines.size(); i++) {
+        const LrcLine& line = lines[i];
+        if (line.text.empty()) continue;
+
+        string entrance = line_entrance(line, base_entrance);
+        double t = round3(line.time + offset);
+        // Word-timed lines light up glyph by glyph, so the fade-out waits for
+        // the last one. (JS slices charTimes to text.length in UTF-16 units;
+        // the array is built one-per-codepoint, so the slice never cuts.)
+        vector<double> ct;
+        bool has_ct = false;
+        if (line.has_ct) {
+            has_ct = true;
+            for (double v : line.ct) ct.push_back(round3(v + offset));
+        }
+        double last_glyph = has_ct && !ct.empty() ? *max_element(ct.begin(), ct.end()) : t;
+        double next_raw = i + 1 < lines.size() ? lines[i + 1].time + offset : total;
+        double next = isfinite(next_raw) ? next_raw : t + 3.0;
+        // Never let a line outlive the next cue; always leave room to fade.
+        // (opts.hold is never set by the CLI.)
+        double out_at = round3(js_max(t + 0.1, js_min(next, t + 1e9) - fade_out));
+        if (has_ct) out_at = round3(js_max(out_at, last_glyph + 0.15));
+
+        ojson anims = ojson::array();
+        push_entrance(anims, entrance, t, stagger);
+        ojson fade = ojson::object();
+        fade["type"] = "fade";
+        fade["duration"] = fade_in;
+        fade["stagger"] = stagger;
+        fade["start_at"] = t;
+        fade["fade_out_at"] = out_at;
+        fade["fade_out"] = fade_out;
+        anims.push_back(move(fade));
+        ojson jit = build_jitter(o.jitter, lyric_index, t);
+        if (!jit.is_null()) anims.push_back(move(jit));
+        ojson wav = build_wave(o.wave, lyric_index, t);
+        if (!wav.is_null()) anims.push_back(move(wav));
+
+        ojson block = ojson::object();
+        block["text"] = line.text;
+        block["size"] = size;
+        block["depth"] = depth;
+        block["position"] = ojson::array({0.0, y, 0.0});
+        ojson mat = ojson::object();
+        mat["type"] = "neon";
+        mat["color"] = color;
+        mat["strength"] = strength;
+        block["material"] = move(mat);
+        block["alpha"] = 1.0;
+        block["animations"] = move(anims);
+        if (isfinite(fit)) block["fit_width"] = fit;
+        // One absolute start time per glyph; it rides on the block because
+        // fade, entrance and wobble all fall on the same rhythm.
+        if (has_ct) block["char_times"] = ct;
+        out.push_back(move(block));
+        lyric_index += 1;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// gen: standalone title/subtitle cards (buildTitleBlock)
+// ---------------------------------------------------------------------------
+
+struct TitleOpts {
+    string text;
+    double size = numeric_limits<double>::quiet_NaN();  // clampNum → 3
+    double y = numeric_limits<double>::quiet_NaN();     // isfinite ? : 0.6
+    double depth = numeric_limits<double>::quiet_NaN(); // clampNum → 0.12
+    string color;
+    double strength = numeric_limits<double>::quiet_NaN();
+    double start_at = numeric_limits<double>::quiet_NaN();
+    double out_at = numeric_limits<double>::quiet_NaN();
+    double fade_in = numeric_limits<double>::quiet_NaN();  // clampNum → 0.9
+    double fade_out = numeric_limits<double>::quiet_NaN(); // clampNum → 0.9
+    double stagger = numeric_limits<double>::quiet_NaN();  // clampNum → 0.03
+    string entrance;
+    double fit_width = numeric_limits<double>::quiet_NaN();
+    string outline;
+    double outline_width = numeric_limits<double>::quiet_NaN();
+};
+
+static ojson build_title_block(const TitleOpts& o) {
+    string text = js_trim(o.text);
+    if (text.empty()) return ojson(nullptr);
+
+    double size = clamp_num(o.size, 3, 0.2, 12);
+    double y = isfinite(o.y) ? o.y : 0.6;
+    double depth = clamp_num(o.depth, 0.12, 0.01, 2);
+    string color = o.color.empty() ? "#ffffff" : o.color;
+    double strength = clamp_num(o.strength, 1.6, 0, 64);
+    double start_at = round3(js_max(0.0, isfinite(o.start_at) ? o.start_at : 0.0));
+    double fade_in = clamp_num(o.fade_in, 0.9, 0, 10);
+    double fade_out = clamp_num(o.fade_out, 0.9, 0, 10);
+    double stagger = clamp_num(o.stagger, 0.03, 0, 1);
+    bool has_out = isfinite(o.out_at);
+    string entrance = o.entrance.empty() ? "none" : o.entrance;
+    check_entrance(entrance);
+
+    ojson anims = ojson::array();
+    if (entrance == "slide") {
+        ojson a = ojson::object();
+        a["type"] = "slide";
+        a["delta"] = ojson::array({0.0, -1.6, 0.0});
+        a["duration"] = 1.2;
+        a["stagger"] = stagger;
+        a["ease"] = "ease_out_quad";
+        a["start_at"] = start_at;
+        anims.push_back(move(a));
+    } else if (entrance == "fall") {
+        ojson a = ojson::object();
+        a["type"] = "fall";
+        a["duration"] = 1.2;
+        a["stagger"] = stagger;
+        a["height"] = 1.8;
+        a["gravity"] = -3.0;
+        a["drift"] = 0.0;
+        a["wobble"] = 0.0;
+        a["start_at"] = start_at;
+        anims.push_back(move(a));
+    } else if (entrance == "pop") {
+        ojson a = ojson::object();
+        a["type"] = "pop";
+        a["duration"] = 0.7;
+        a["stagger"] = stagger;
+        a["start_at"] = start_at;
+        a["from"] = 0.0;
+        a["ease"] = "back_out";
+        anims.push_back(move(a));
+    }
+    ojson fade = ojson::object();
+    fade["type"] = "fade";
+    fade["duration"] = fade_in;
+    fade["stagger"] = stagger;
+    fade["start_at"] = start_at;
+    if (has_out && o.out_at > start_at) {
+        fade["fade_out_at"] = round3(o.out_at);
+        fade["fade_out"] = fade_out;
+    }
+    anims.push_back(move(fade));
+
+    ojson block = ojson::object();
+    block["text"] = text;
+    block["size"] = size;
+    block["depth"] = depth;
+    block["position"] = ojson::array({0.0, y, 0.0});
+    ojson mat = ojson::object();
+    mat["type"] = "neon";
+    mat["color"] = color;
+    mat["strength"] = strength;
+    block["material"] = move(mat);
+    block["alpha"] = 1.0;
+    block["animations"] = move(anims);
+    if (isfinite(o.fit_width) && o.fit_width > 0) block["fit_width"] = o.fit_width;
+    if (!o.outline.empty()) {
+        ojson outline = ojson::object();
+        outline["color"] = o.outline;
+        double w = isfinite(o.outline_width) && o.outline_width != 0 ? o.outline_width : 0.02;
+        outline["width"] = w;
+        outline["strength"] = 1.0;
+        block["material"]["outline"] = move(outline);
+    }
+    return block;
+}
+
+// ---------------------------------------------------------------------------
+// gen: named background looks + cuts (buildBackgrounds / parseCut)
+// ---------------------------------------------------------------------------
+
+struct Look {
+    const char* top;
+    const char* bottom;
+    const char* accent;
+    double nebula, stars, drift;
+};
+static const map<string, Look> LOOKS = {
+    {"night", {"#01040f", "#05060f", "#2f6dff", 0.55, 0.75, 1.0}},
+    {"void", {"#000000", "#02030a", "#1b2c6b", 0.30, 0.95, 0.6}},
+    {"nebula", {"#0a0320", "#12062e", "#a24bff", 0.85, 0.65, 1.3}},
+    {"aurora", {"#001a26", "#001014", "#00ffb3", 0.75, 0.50, 0.9}},
+    {"ember", {"#1a0503", "#0a0201", "#ff6a1e", 0.70, 0.35, 1.1}},
+    {"ice", {"#041224", "#02060e", "#8fe3ff", 0.45, 0.80, 0.8}},
+    {"dawn", {"#2a0a3a", "#4a1420", "#ff9a3c", 0.60, 0.30, 1.0}},
+    {"bloom", {"#1a0226", "#26043a", "#ff3ea5", 0.80, 0.50, 1.2}},
+};
+
+struct Cut {
+    double at = 0;
+    bool has_name = false;
+    string name;
+    bool has_palette = false;
+    ojson palette;
+};
+
+static vector<string> js_split(const string& s, char sep) {
+    vector<string> out;
+    size_t pos = 0;
+    while (true) {
+        size_t f = s.find(sep, pos);
+        if (f == string::npos) {
+            out.push_back(s.substr(pos));
+            break;
+        }
+        out.push_back(s.substr(pos, f - pos));
+        pos = f + 1;
+    }
+    return out;
+}
+
+// <seconds>:<look> or <seconds>:#top/#bottom/#accent[@n,s,d] → one cut.
+static Cut parse_cut(const string& raw) {
+    // A trailing ` # …` note is allowed; hexes never have whitespace before #.
+    string line = raw;
+    for (size_t i = 0; i + 1 < line.size(); i++)
+        if (js_ws_at(line, i) && line[i + 1] == '#') {
+            line = line.substr(0, i);
+            break;
+        }
+    size_t ci = line.rfind(':');
+    if (ci == string::npos)
+        throw runtime_error("--bg-cut wants <seconds>:<look>, got " + raw);
+    double at = parse_num(line.substr(0, ci));
+    if (!isfinite(at))
+        throw runtime_error("--bg-cut: bad time in " + raw);
+    string spec = line.substr(ci + 1);
+    Cut c;
+    c.at = at;
+    if (spec.find('/') == string::npos) {
+        c.has_name = true;
+        c.name = spec;
+        return c;
+    }
+    auto parts = js_split(spec, '/');
+    if (parts.size() != 3)
+        throw runtime_error("--bg-cut palette wants top/bottom/accent, got " + raw);
+    // The accent carries the sliders: `#4a6cff@0.55,0.85,1.0`. JS destructures
+    // split('@'), so extra '@' components are dropped.
+    string accent = parts[2], sliders;
+    {
+        size_t atpos = parts[2].find('@');
+        if (atpos != string::npos) {
+            accent = parts[2].substr(0, atpos);
+            string rest = parts[2].substr(atpos + 1);
+            size_t at2 = rest.find('@');
+            sliders = at2 == string::npos ? rest : rest.substr(0, at2);
+        }
+    }
+    for (const string* hex : {&parts[0], &parts[1], &accent})
+        if (!is_hex6(*hex))
+            throw runtime_error("--bg-cut: \"" + *hex + "\" is not #rrggbb in " + raw);
+    c.has_palette = true;
+    ojson palette = ojson::object();
+    palette["top"] = parts[0];
+    palette["bottom"] = parts[1];
+    palette["accent"] = accent;
+    palette["nebula"] = 0.6;
+    palette["stars"] = 0.6;
+    palette["drift"] = 1.0;
+    if (!sliders.empty()) {
+        auto sl = js_split(sliders, ',');
+        // RATIO(v, lo, hi, fallback): Number("") is 0 — quirk preserved.
+        auto ratio = [](double v, double lo, double hi, double fb) {
+            if (!isfinite(v)) return fb;
+            return min(hi, max(lo, v));
+        };
+        double n = sl.size() > 0 ? parse_num(sl[0]) : numeric_limits<double>::quiet_NaN();
+        double st = sl.size() > 1 ? parse_num(sl[1]) : numeric_limits<double>::quiet_NaN();
+        double d = sl.size() > 2 ? parse_num(sl[2]) : numeric_limits<double>::quiet_NaN();
+        palette["nebula"] = ratio(n, 0, 1, 0.6);
+        palette["stars"] = ratio(st, 0, 1, 0.6);
+        palette["drift"] = ratio(d, 0, 4, 1.0);
+    }
+    c.palette = move(palette);
+    return c;
+}
+
+// Turn --bg-look / --bg-cut into the background timeline the renderer
+// crossfades through; null when neither flag was given.
+static ojson build_backgrounds(const vector<string>& bg_cut, const string& bg_look,
+                               double bg_fade) {
+    struct Entry {
+        double at;
+        bool has_name;
+        string name;
+        bool has_palette;
+        ojson palette;
+    };
+    vector<Entry> cuts;
+    if (!bg_look.empty()) cuts.push_back({0.0, true, bg_look, false, {}});
+    for (const string& raw : bg_cut) {
+        Cut c = parse_cut(raw);
+        if (c.has_palette)
+            cuts.push_back({c.at, false, "", true, move(c.palette)});
+        else
+            cuts.push_back({c.at, true, c.name, false, {}});
+    }
+    if (cuts.empty()) return ojson(nullptr);
+    // A first cut with no opener still needs something to cut *from*.
+    if (cuts[0].at > 0) cuts.insert(cuts.begin(), {0.0, true, string("night"), false, {}});
+    for (const Entry& c : cuts)
+        if (!c.has_palette && !LOOKS.count(c.name))
+            throw runtime_error("unknown look \"" + c.name +
+                                "\" (have: night, void, nebula, aurora, ember, ice, dawn, bloom)");
+    stable_sort(cuts.begin(), cuts.end(),
+                [](const Entry& a, const Entry& b) { return a.at < b.at; });
+    double fade = isfinite(bg_fade) ? min(60.0, max(0.0, bg_fade)) : 1.5;
+    ojson arr = ojson::array();
+    for (size_t i = 0; i < cuts.size(); i++) {
+        const Entry& c = cuts[i];
+        ojson e = ojson::object();
+        e["at"] = i == 0 ? 0.0 : c.at;
+        e["fade"] = i == 0 ? 0.0 : fade;
+        if (c.has_palette) {
+            for (auto& kv : c.palette.items()) e[kv.key()] = kv.value();
+        } else {
+            const Look& L = LOOKS.at(c.name);
+            e["top"] = L.top;
+            e["bottom"] = L.bottom;
+            e["accent"] = L.accent;
+            e["nebula"] = L.nebula;
+            e["stars"] = L.stars;
+            e["drift"] = L.drift;
+        }
+        arr.push_back(move(e));
+    }
+    return arr;
+}
+
+// The grade/distortion rack, or nothing so the scene renders untouched.
+static ojson build_fx(const OptNum& fx_chromatic, const OptNum& fx_vignette,
+                      const OptNum& fx_sat, const OptNum& fx_flash, const OptNum& fx_punch) {
+    ojson fx = ojson::object();
+    fx["enabled"] = true;
+    fx["chromatic"] = opt_clamp(fx_chromatic, 0, 0.05, 0.0016);
+    fx["vignette"] = opt_clamp(fx_vignette, 0, 1, 0.55);
+    fx["saturation"] = opt_clamp(fx_sat, 0, 4, 1.12);
+    fx["flash"] = opt_clamp(fx_flash, 0, 1, 0.22);
+    fx["punch"] = opt_clamp(fx_punch, 0, 5, 0.35);
+    fx["hit_duration"] = 0.35;
+    return fx;
+}
+
+// ---------------------------------------------------------------------------
+// gen: camera (tuneOrbit / applyCameraMotion)
+// ---------------------------------------------------------------------------
+
+// Swap the template's full-turn orbit for a slow symmetric sway about head-on:
+// start yawDrift/2 short of straight-on, cover exactly yawDrift over the scene.
+static ojson tune_orbit(const ojson& tpl, double duration, const GenArgs& args) {
+    const ojson* base =
+        tpl.contains("camera_animation") ? &tpl["camera_animation"] : nullptr;
+    bool orbit = base && base->is_object() && base->contains("type") &&
+                 base->at("type").is_string() && base->at("type").get<string>() == "orbit";
+    ojson anim;
+    if (orbit) {
+        anim = *base;
+    } else {
+        anim = ojson::object();
+        anim["type"] = "orbit";
+        anim["radius"] = 14.0;
+        anim["elevation"] = 0.09;
+        anim["target"] = ojson::array({0.0, 1.0, 0.0});
+    }
+    if (opt_finite(args.radius) && args.radius.v > 0) anim["radius"] = args.radius.v;
+    double drift = opt_finite(args.yaw_drift) ? args.yaw_drift.v : 0.6;
+    anim["start_yaw"] = M_PI / 2 - drift / 2;
+    anim["speed"] = drift / js_max(duration, 1e-3);
+    return anim;
+}
+
+// Layer an eased camera move and/or a hand-held shake onto the orbit; with no
+// flags the orbit is left untouched, so regenerated scenes stay identical.
+static void apply_camera_motion(ojson& anim, double duration, const GenArgs& args) {
+    if (!anim.is_object() || !anim.contains("type") || !anim["type"].is_string() ||
+        anim["type"].get<string>() != "orbit")
+        return;
+    bool has_move = opt_finite(args.dolly) || opt_finite(args.crane);
+    if (has_move) {
+        ojson move = ojson::object();
+        move["ease"] = "ease_in_out_cubic";
+        if (opt_finite(args.dolly) && args.dolly.v > 0) move["radius_end"] = args.dolly.v;
+        if (opt_finite(args.crane)) move["elevation_end"] = args.crane.v;
+        move["at"] = opt_finite(args.move_at) ? args.move_at.v : duration * 0.12;
+        move["duration"] = opt_finite(args.move_dur) ? args.move_dur.v : duration * 0.76;
+        anim["movement"] = move;
+    }
+    if (opt_finite(args.shake) && args.shake.v > 0) {
+        ojson shake = ojson::object();
+        shake["amplitude"] = args.shake.v;
+        shake["frequency"] = opt_finite(args.shake_freq) ? args.shake_freq.v : 3.5;
+        shake["roll"] = opt_finite(args.shake_roll) ? args.shake_roll.v : 0.008;
+        shake["at"] = 0.0;
+        shake["until"] = nullptr;
+        shake["ramp"] = 0.8;
+        // Only written when asked for, so scenes without the flag stay identical.
+        if (args.shake_hit) {
+            shake["hit"] = true;
+            shake["hit_duration"] = opt_finite(args.shake_hit_dur) ? args.shake_hit_dur.v : 0.55;
+        }
+        anim["shake"] = move(shake);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// gen: JS-flavoured JSON serialisation
+// ---------------------------------------------------------------------------
+
+// ECMAScript Number → String, the rules JSON.stringify uses for doubles:
+// shortest decimal that round-trips, exponent form only outside 1e-7…1e21.
+static void js_dtoa(double v, string& out) {
+    if (isnan(v) || isinf(v)) {
+        out += "null";  // JSON.stringify coerces nonfinite to null
+        return;
+    }
+    if (v == 0) {
+        out += "0";  // also -0 → "0"
+        return;
+    }
+    if (v < 0) {
+        out += '-';
+        v = -v;
+    }
+    double a = v;
+    char buf[64];
+    int p;
+    for (p = 1; p <= 17; p++) {
+        snprintf(buf, sizeof buf, "%.*e", p - 1, a);
+        if (strtod(buf, nullptr) == a) break;
+    }
+    if (p > 17) snprintf(buf, sizeof buf, "%.16e", a);
+    // Split "d[.ddd]e±XX" into digits and n, where value = 0.digits · 10^n.
+    string mant = buf;
+    size_t epos = mant.find('e');
+    if (epos == string::npos) epos = mant.find('E');
+    long E = epos == string::npos ? 0 : strtol(mant.c_str() + epos + 1, nullptr, 10);
+    string digits;
+    for (size_t i = 0; i < (epos == string::npos ? mant.size() : epos); i++)
+        if (buf[i] >= '0' && buf[i] <= '9') digits += buf[i];
+    long n = E + 1;
+    size_t k = digits.size();
+    auto put_zeros = [&](long count) {
+        for (long z = 0; z < count; z++) out += '0';
+    };
+    if (k <= (size_t)max(n, 0L) && n <= 21) {
+        out += digits;
+        put_zeros((long)n - (long)k);
+    } else if (0 < n && n <= 21) {
+        out += digits.substr(0, (size_t)n);
+        out += '.';
+        out += digits.substr((size_t)n);
+    } else if (-6 < n && n <= 0) {
+        out += "0.";
+        put_zeros(-n);
+        out += digits;
+    } else {
+        out += digits.substr(0, 1);
+        if (k > 1) {
+            out += '.';
+            out += digits.substr(1);
+        }
+        out += 'e';
+        long ex = n - 1;
+        out += ex < 0 ? '-' : '+';
+        char eb[16];
+        snprintf(eb, sizeof eb, "%ld", ex < 0 ? -ex : ex);
+        out += eb;
+    }
+}
+
+static string js_num_str(double v) {
+    string o;
+    js_dtoa(v, o);
+    return o;
+}
+
+static void js_json_str(const string& s, string& out) {
+    out += '"';
+    for (unsigned char c : s) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\b': out += "\\b"; break;
+        case '\t': out += "\\t"; break;
+        case '\n': out += "\\n"; break;
+        case '\f': out += "\\f"; break;
+        case '\r': out += "\\r"; break;
+        default:
+            if (c < 0x20) {
+                char b[8];
+                snprintf(b, sizeof b, "\\u%04x", c);
+                out += b;
+            } else {
+                out += (char)c;
+            }
+        }
+    }
+    out += '"';
+}
+
+// JSON.stringify(value, null, 2): 2-space indent, empty arrays/objects collapse,
+// non-ASCII stays raw UTF-8, no spaces around brackets.
+static void js_json(const ojson& j, string& out, int depth) {
+    if (j.is_null()) { out += "null"; return; }
+    if (j.is_boolean()) { out += j.get<bool>() ? "true" : "false"; return; }
+    if (j.is_number_unsigned()) { out += to_string(j.get<uint64_t>()); return; }
+    if (j.is_number_integer()) { out += to_string(j.get<int64_t>()); return; }
+    if (j.is_number_float()) { js_dtoa(j.get<double>(), out); return; }
+    if (j.is_string()) { js_json_str(j.get<string>(), out); return; }
+    if (j.is_array()) {
+        if (j.empty()) { out += "[]"; return; }
+        out += "[\n";
+        for (size_t i = 0; i < j.size(); i++) {
+            out.append((size_t)depth + 2, ' ');
+            js_json(j[i], out, depth + 2);
+            if (i + 1 < j.size()) out += ',';
+            out += '\n';
+        }
+        out.append((size_t)depth, ' ');
+        out += ']';
+        return;
+    }
+    if (j.empty()) { out += "{}"; return; }
+    out += "{\n";
+    size_t i = 0, n = j.size();
+    for (auto it = j.begin(); it != j.end(); ++it, ++i) {
+        out.append((size_t)depth + 2, ' ');
+        js_json_str(it.key(), out);
+        out += ": ";
+        js_json(it.value(), out, depth + 2);
+        if (i + 1 < n) out += ',';
+        out += '\n';
+    }
+    out.append((size_t)depth, ' ');
+    out += '}';
+}
+
+// JS truthiness for template leaf checks (work_dir || default, bloom?, dof?).
+static bool js_truthy(const ojson& v) {
+    if (v.is_null()) return false;
+    if (v.is_boolean()) return v.get<bool>();
+    if (v.is_number()) {
+        double d = v.get<double>();
+        return d == d && d != 0;
+    }
+    if (v.is_string()) return !v.get<string>().empty();
+    return true;  // arrays/objects are truthy even when empty
+}
+
+static ojson* find_fade(ojson& block) {
+    if (!block.contains("animations")) return nullptr;
+    for (auto& an : block["animations"])
+        if (an.is_object() && an.contains("type") && an["type"].is_string() &&
+            an["type"].get<string>() == "fade")
+            return &an;
+    return nullptr;
+}
+
+static string read_file(const string& path) {
+    // MinGW's ifstream(char*) opens through the ANSI codepage and fails on
+    // Chinese paths; going through a filesystem::path built from UTF-8 uses
+    // the wide opening path instead.
+    filesystem::path p = filesystem::u8path(path);
+    ifstream f(p, ios::binary);
+    if (!f) throw runtime_error("cannot read " + path);
+    f.seekg(0, ios::end);
+    size_t n = (size_t)f.tellg();
+    f.seekg(0);
+    string s(n, '\0');
+    f.read(&s[0], (streamsize)n);
+    if (f.gcount() >= 0 && (size_t)f.gcount() != n) s.resize((size_t)f.gcount());
+    return s;
+}
+
+// Single-layout gen never spends the roll budget, but the JS CLI still opens
+// and validates the envelope — keep the same error behaviour.
+static void check_energy_file(const string& path) {
+    string src = read_file(path);
+    json ej = json::parse(src);
+    if (!ej.contains("data") || !ej["data"].is_array() || ej["data"].empty())
+        throw runtime_error("--energy-file: " + path + " has no envelope data");
+}
+
+// ---------------------------------------------------------------------------
+// gen: CLI (parseArgs + main)
+// ---------------------------------------------------------------------------
+
+static void gen_usage() {
+    fputs(
+        "chamina-cpp gen <song.lrc> [options]\n"
+        "  LRC → scene JSON, single layout (port of node js/lrc2scene.mjs)\n"
+        "  -o, --out <file>       output scene JSON (default <lrc>.json)\n"
+        "  -t, --template <file>  stage to reuse (default scenes/gift.json, cwd-relative)\n"
+        "  text:   --size --y --depth --color --strength --outline --outline-width\n"
+        "  motion: --entrance --jitter --jitter-rot --jitter-freq --jitter-hit\n"
+        "          --jitter-hit-dur --wave --wave-freq --wave-spacing --wave-hit\n"
+        "          --wave-hit-dur\n"
+        "  camera: --dolly --crane --move-at --move-dur --shake --shake-roll\n"
+        "          --shake-freq --shake-hit --shake-hit-dur --yaw-drift --radius\n"
+        "          --keep-camera\n"
+        "  timing: --offset --fade-in --fade-out --stagger --tail --duration\n"
+        "          --fit-width --keep-open\n"
+        "  cards:  --title --subtitle --title-in --title-out --title-size\n"
+        "          --outro-at --outro-text --outro-subtitle --outro-wish --outro-out\n"
+        "  stage:  --bg-look --bg-cut --bg-fade --fx --fx-flash --fx-punch\n"
+        "          --fx-vignette --fx-chromatic --fx-sat --bloom --fps --palette\n"
+        "  not ported yet (accepted, no-op in single layout): --roll-power\n"
+        "          --force-whip --energy-file; --layout field and --groups auto\n"
+        "          are rejected\n"
+        "  -h, --help\n",
+        stderr);
+}
+
+static void parse_gen_args(int argc, char** argv, GenArgs& o) {
+    auto next = [&](int& i) -> string {
+        i++;
+        if (i >= argc) throw runtime_error(string(argv[i - 1]) + " needs a value");
+        return argv[i];
+    };
+    // argv[0] is the "gen" token itself (JS parses process.argv.slice(2)).
+    for (int i = 1; i < argc; i++) {
+        string a = argv[i];
+        OptNum n = OPT_NULL;
+        if (a == "-o" || a == "--out") o.out = next(i);
+        else if (a == "-t" || a == "--template") o.templ = next(i);
+        else if (a == "--size") { n = optn(parse_num(next(i))); o.size = n; }
+        else if (a == "--y") { n = optn(parse_num(next(i))); o.y = n; }
+        else if (a == "--depth") { n = optn(parse_num(next(i))); o.depth = n; }
+        else if (a == "--color") o.color = next(i);
+        else if (a == "--strength") { n = optn(parse_num(next(i))); o.strength = n; }
+        else if (a == "--outline") o.outline = next(i);
+        else if (a == "--outline-width") { n = optn(parse_num(next(i))); o.outline_width = n; }
+        else if (a == "--bloom") { n = optn(parse_num(next(i))); o.bloom = n; }
+        else if (a == "--entrance") o.entrance = next(i);
+        else if (a == "--layout") o.layout = next(i);
+        else if (a == "--groups") o.groups = next(i);
+        else if (a == "--jitter") { n = optn(parse_num(next(i))); o.jitter = n; }
+        else if (a == "--jitter-rot") { n = optn(parse_num(next(i))); o.jitter_rot = n; }
+        else if (a == "--jitter-freq") { n = optn(parse_num(next(i))); o.jitter_freq = n; }
+        else if (a == "--jitter-hit") o.jitter_hit = true;
+        else if (a == "--jitter-hit-dur") { n = optn(parse_num(next(i))); o.jitter_hit_dur = n; }
+        else if (a == "--wave") { n = optn(parse_num(next(i))); o.wave = n; }
+        else if (a == "--wave-freq") { n = optn(parse_num(next(i))); o.wave_freq = n; }
+        else if (a == "--wave-spacing") { n = optn(parse_num(next(i))); o.wave_spacing = n; }
+        else if (a == "--wave-hit") o.wave_hit = true;
+        else if (a == "--wave-hit-dur") { n = optn(parse_num(next(i))); o.wave_hit_dur = n; }
+        else if (a == "--dolly") { n = optn(parse_num(next(i))); o.dolly = n; }
+        else if (a == "--crane") { n = optn(parse_num(next(i))); o.crane = n; }
+        else if (a == "--move-at") { n = optn(parse_num(next(i))); o.move_at = n; }
+        else if (a == "--move-dur") { n = optn(parse_num(next(i))); o.move_dur = n; }
+        else if (a == "--shake") { n = optn(parse_num(next(i))); o.shake = n; }
+        else if (a == "--shake-roll") { n = optn(parse_num(next(i))); o.shake_roll = n; }
+        else if (a == "--shake-freq") { n = optn(parse_num(next(i))); o.shake_freq = n; }
+        else if (a == "--shake-hit") o.shake_hit = true;
+        else if (a == "--shake-hit-dur") { n = optn(parse_num(next(i))); o.shake_hit_dur = n; }
+        else if (a == "--fit-width") { n = optn(parse_num(next(i))); o.fit_width = n; }
+        else if (a == "--offset") { n = optn(parse_num(next(i))); o.offset = n; }
+        else if (a == "--fade-in") { n = optn(parse_num(next(i))); o.fade_in = n; }
+        else if (a == "--fade-out") { n = optn(parse_num(next(i))); o.fade_out = n; }
+        else if (a == "--stagger") { n = optn(parse_num(next(i))); o.stagger = n; }
+        else if (a == "--tail") { n = optn(parse_num(next(i))); o.tail = n; }
+        else if (a == "--duration") { n = optn(parse_num(next(i))); o.duration = n; }
+        else if (a == "--yaw-drift") { n = optn(parse_num(next(i))); o.yaw_drift = n; }
+        else if (a == "--radius") { n = optn(parse_num(next(i))); o.radius = n; }
+        else if (a == "--keep-camera") o.keep_camera = true;
+        else if (a == "--keep-open") o.keep_open = true;
+        else if (a == "--outro-at") { n = optn(parse_num(next(i))); o.outro_at = n; }
+        else if (a == "--outro-text") { o.outro_text = next(i); o.has_outro_text = true; }
+        else if (a == "--outro-subtitle") { o.outro_subtitle = next(i); o.has_outro_subtitle = true; }
+        else if (a == "--outro-wish") o.outro_wish = next(i);
+        else if (a == "--outro-out") { n = optn(parse_num(next(i))); o.outro_out = n; }
+        else if (a == "--bg-look") o.bg_look = next(i);
+        else if (a == "--bg-cut") o.bg_cut.push_back(next(i));
+        else if (a == "--bg-fade") { n = optn(parse_num(next(i))); o.bg_fade = n; }
+        else if (a == "--fx") o.fx = true;
+        else if (a == "--fx-flash") { n = optn(parse_num(next(i))); o.fx_flash = n; }
+        else if (a == "--fx-punch") { n = optn(parse_num(next(i))); o.fx_punch = n; }
+        else if (a == "--fx-vignette") { n = optn(parse_num(next(i))); o.fx_vignette = n; }
+        else if (a == "--fx-chromatic") { n = optn(parse_num(next(i))); o.fx_chromatic = n; }
+        else if (a == "--fx-sat") { n = optn(parse_num(next(i))); o.fx_sat = n; }
+        else if (a == "--palette") o.palette = next(i);
+        else if (a == "--roll-power") { n = optn(parse_num(next(i))); o.roll_power = n; }
+        else if (a == "--energy-file") o.energy_file = next(i);
+        else if (a == "--force-whip") o.force_whip.push_back(next(i));
+        else if (a == "--fps") { n = optn(parse_num(next(i))); o.fps = n; }
+        else if (a == "--title") o.title = next(i);
+        else if (a == "--subtitle") o.subtitle = next(i);
+        else if (a == "--title-in") { n = optn(parse_num(next(i))); o.title_in = n; }
+        else if (a == "--title-out") { n = optn(parse_num(next(i))); o.title_out = n; }
+        else if (a == "--title-size") { n = optn(parse_num(next(i))); o.title_size = n; }
+        else if (a == "-h" || a == "--help") o.help = true;
+        else if (!a.empty() && a[0] != '-' && o.input.empty()) o.input = a;
+        else throw runtime_error("unknown argument " + a);
+    }
+}
+
+static int gen_main(int argc, char** argv) {
+    GenArgs a;
+    try {
+        parse_gen_args(argc, argv, a);
+    } catch (const exception& e) {
+        fprintf(stderr, "%s\n", e.what());
+        return 1;
+    }
+    if (a.help || a.input.empty()) {
+        gen_usage();
+        return a.help ? 0 : 1;
+    }
+    try {
+        if (a.layout != "single" && a.layout != "field")
+            throw runtime_error("--layout must be single or field (got \"" + a.layout + "\")");
+        if (a.groups != "off" && a.groups != "auto")
+            throw runtime_error("--groups must be off or auto (got \"" + a.groups + "\")");
+        if (a.layout == "field" || a.groups == "auto")
+            throw runtime_error(
+                "chamina-cpp gen: --layout field / --groups auto not ported yet — "
+                "use node js/lrc2scene.mjs");
+
+        LrcParsed parsed = parse_lrc(read_file(a.input));
+        // The [offset:] tag and --offset both nudge the whole song; the tag
+        // runs first so the CLI flag stays an explicit authoring correction.
+        double off = opt_num0(a.offset);
+        vector<LrcLine> lines;
+        for (const auto& l : apply_offset(parsed, false, 0.0)) {
+            LrcLine o;
+            o.time = l.time + off;
+            o.text = l.text;
+            o.has_tags = l.has_tags;
+            o.tags = l.tags;
+            if (l.has_ct) {
+                o.has_ct = true;
+                for (double v : l.ct) o.ct.push_back(v + off);
+            }
+            lines.push_back(move(o));
+        }
+        if (lines.empty())
+            throw runtime_error("no timestamped lines in " + a.input);
+
+        ojson tpl = ojson::parse(read_file(a.templ));
+        double duration = opt_finite(a.duration)
+                              ? a.duration.v
+                              : suggest_duration(lines, a.tail.v);
+
+        ojson camera_animation = ojson(nullptr);
+        bool cam_absent = false;
+        if (a.keep_camera) {
+            if (tpl.contains("camera_animation"))
+                camera_animation = tpl["camera_animation"];
+            else
+                cam_absent = true;
+        } else {
+            camera_animation = tune_orbit(tpl, duration, a);
+        }
+        if (!cam_absent) apply_camera_motion(camera_animation, duration, a);
+
+        // Keep a margin: outline rim, bloom bleed and DOF softness all push
+        // the line outward beyond its advance width.
+        double vw = visible_width(tpl, cam_absent ? nullptr : &camera_animation);
+        double fit_width = a.fit_width.is_null ? vw * 0.85 : a.fit_width.v;
+
+        // Card times, derived before the layout runs.
+        double outro_at = opt_finite(a.outro_at) && a.outro_at.v > 0
+                              ? a.outro_at.v
+                              : numeric_limits<double>::quiet_NaN();
+        double outro_out;
+        if (opt_finite(a.outro_out) && a.outro_out.v > 0)
+            outro_out = a.outro_out.v;
+        else
+            outro_out = js_max((isfinite(outro_at) ? outro_at : 0.0) + 3.0, duration - 1.5);
+        double first_cue = !lines.empty() ? lines[0].time : duration;
+        double title_out;
+        if (opt_finite(a.title_out) && a.title_out.v >= 0)
+            title_out = a.title_out.v;
+        else
+            title_out = js_max(a.title_in.v + 2.0, first_cue - 1.2);
+
+        // Only lines that actually render take part in the export.
+        vector<LrcLine> lyric_lines;
+        for (const auto& l : lines)
+            if (!l.text.empty()) lyric_lines.push_back(l);
+        if (!a.energy_file.empty()) check_energy_file(a.energy_file);
+
+        ojson jitter_obj = ojson(nullptr);
+        if (opt_finite(a.jitter) && a.jitter.v > 0) {
+            jitter_obj = ojson::object();
+            jitter_obj["amplitude"] = a.jitter.v;
+            jitter_obj["rotation"] = a.jitter_rot.v;
+            jitter_obj["frequency"] = a.jitter_freq.v;
+            jitter_obj["hit"] = a.jitter_hit;
+            jitter_obj["hit_duration"] = a.jitter_hit_dur.v;
+        }
+        ojson wave_obj = ojson(nullptr);
+        if (opt_finite(a.wave) && a.wave.v > 0) {
+            wave_obj = ojson::object();
+            wave_obj["amplitude"] = a.wave.v;
+            wave_obj["frequency"] = a.wave_freq.v;
+            wave_obj["spacing"] = a.wave_spacing.v;
+            wave_obj["hit"] = a.wave_hit;
+            wave_obj["hit_duration"] = a.wave_hit_dur.v;
+        }
+
+        LyricOpts lo;
+        lo.size = a.size.v;
+        lo.y = a.y.v;
+        lo.depth = a.depth.v;
+        lo.color = a.color;
+        lo.strength = a.strength.v;
+        lo.fade_in = a.fade_in.v;
+        lo.fade_out = a.fade_out.v;
+        lo.stagger = a.stagger.v;
+        lo.entrance = a.entrance;
+        lo.total = duration;
+        lo.fit_width = fit_width;
+        lo.jitter = jitter_obj.is_null() ? nullptr : &jitter_obj;
+        lo.wave = wave_obj.is_null() ? nullptr : &wave_obj;
+        vector<ojson> texts = build_lyric_texts(lyric_lines, lo);
+
+        if (!a.outline.empty()) {
+            for (auto& t : texts) {
+                ojson outline = ojson::object();
+                outline["color"] = a.outline;
+                outline["width"] = a.outline_width.v;
+                outline["strength"] = 1.0;
+                t["material"]["outline"] = move(outline);
+            }
+        }
+        // Per-line colour cycle; runs after the rim exists so the rim follows
+        // each line's own tint. Cards are built later and keep --color.
+        if (!a.palette.empty()) apply_palette(texts, a.palette);
+
+        if (a.keep_open && !texts.empty()) {
+            ojson* fade = find_fade(texts.back());
+            if (fade) {
+                fade->erase("fade_out_at");
+                fade->erase("fade_out");
+            }
+        }
+
+        // Outro card. The last cue lands far before the track ends, so the
+        // held last line hands the frame over at outro-at - 0.6.
+        if (isfinite(outro_at) && !texts.empty()) {
+            ojson* fade = find_fade(texts.back());
+            if (fade && fade->contains("start_at") && (*fade)["start_at"].is_number()) {
+                double hand_off = round3(
+                    js_max((*fade)["start_at"].get<double>() + 2.0, outro_at - 0.6));
+                double foa = fade->contains("fade_out_at") && (*fade)["fade_out_at"].is_number()
+                                 ? (*fade)["fade_out_at"].get<double>()
+                                 : numeric_limits<double>::quiet_NaN();
+                if (!isfinite(foa) || foa > hand_off) {
+                    (*fade)["fade_out"] = a.fade_out.v;
+                    (*fade)["fade_out_at"] = hand_off;
+                }
+            }
+        }
+
+        // Opening card; the outro card(s) close the video.
+        double title_size = opt_clamp(a.title_size, 0.2, 12, 3);
+        string card_entrance = a.entrance == "none" ? "slide" : a.entrance;
+        TitleOpts common;
+        common.color = a.color;
+        common.strength = a.strength.v;
+        common.outline = a.outline;
+        common.outline_width = a.outline_width.v;
+        common.start_at = a.title_in.v;
+        common.out_at = title_out;
+        // A card with `none` still reads better as a slide.
+        common.entrance = card_entrance;
+        common.stagger = 0.05;
+        vector<ojson> cards;
+        auto add_card = [&](const TitleOpts& t) {
+            ojson b = build_title_block(t);
+            if (!b.is_null()) cards.push_back(move(b));
+        };
+        {
+            TitleOpts t = common;
+            t.text = a.title;
+            t.size = title_size;
+            t.y = 1.2;
+            t.fit_width = fit_width * 0.72;
+            add_card(t);
+        }
+        {
+            TitleOpts t = common;
+            t.text = a.subtitle;
+            t.size = title_size / 3.0;
+            t.y = -0.6;
+            t.strength = a.strength.v * 0.7;
+            t.fit_width = fit_width * 0.5;
+            t.stagger = 0.03;
+            add_card(t);
+        }
+        if (isfinite(outro_at)) {
+            {
+                TitleOpts t = common;
+                t.text = a.has_outro_text ? a.outro_text : a.title;
+                t.size = title_size;
+                t.y = 1.2;
+                t.fit_width = fit_width * 0.72;
+                t.start_at = outro_at;
+                t.out_at = outro_out;
+                t.fade_out = 1.4;
+                add_card(t);
+            }
+            {
+                TitleOpts t = common;
+                t.text = a.has_outro_subtitle ? a.outro_subtitle : a.subtitle;
+                t.size = title_size / 3.0;
+                t.y = -0.6;
+                t.strength = a.strength.v * 0.7;
+                t.fit_width = fit_width * 0.5;
+                t.stagger = 0.03;
+                t.start_at = round3(outro_at + 0.35);
+                t.out_at = outro_out;
+                t.fade_out = 1.4;
+                add_card(t);
+            }
+            if (!a.outro_wish.empty()) {
+                TitleOpts t = common;
+                t.text = a.outro_wish;
+                t.size = title_size / 4.0;
+                t.y = -1.7;
+                t.strength = a.strength.v * 0.6;
+                t.fit_width = fit_width * 0.45;
+                t.stagger = 0.05;
+                t.start_at = round3(outro_at + 15.0);
+                t.out_at = outro_out;
+                t.fade_out = 1.4;
+                add_card(t);
+            }
+        }
+
+        ojson scene = tpl;
+        scene["duration"] = duration;
+        // Sample the same timeline more sparsely; written only when asked for.
+        if (opt_finite(a.fps) && a.fps.v > 0) scene["fps"] = a.fps.v;
+        {
+            bool wd = tpl.contains("work_dir") && js_truthy(tpl["work_dir"]);
+            scene["work_dir"] = wd ? tpl["work_dir"] : ojson("target/chamina");
+        }
+        if (!cam_absent) scene["camera_animation"] = camera_animation;
+        ojson bgs = build_backgrounds(a.bg_cut, a.bg_look, a.bg_fade.v);
+        if (!bgs.is_null()) scene["backgrounds"] = move(bgs);
+        if (a.fx)
+            scene["fx"] = build_fx(a.fx_chromatic, a.fx_vignette, a.fx_sat, a.fx_flash,
+                                   a.fx_punch);
+        if (tpl.contains("bloom") && js_truthy(tpl["bloom"])) {
+            ojson bloom = tpl["bloom"];
+            // A full lyric line is far more emissive area than the gift card's
+            // three glyphs — drop the preset intensity.
+            bloom["intensity"] = a.bloom.v;
+            scene["bloom"] = move(bloom);
+        }
+        if (tpl.contains("dof") && js_truthy(tpl["dof"])) {
+            ojson dof = tpl["dof"];
+            // DOF has to focus on the plane the text sits on; a --radius
+            // override would otherwise leave the line permanently defocused.
+            if (opt_gt0(a.radius)) dof["focal_distance"] = a.radius.v;
+            scene["dof"] = move(dof);
+        }
+        ojson texts_all = ojson::array();
+        for (auto& c : cards) texts_all.push_back(move(c));
+        for (auto& t : texts) texts_all.push_back(move(t));
+        scene["texts"] = move(texts_all);
+
+        string out_path = a.out;
+        if (out_path.empty()) {
+            // JS: lrcPath.replace(/\.lrc$/i, '') + '.json'
+            out_path = a.input;
+            if (out_path.size() >= 4) {
+                string tail4 = to_lower_ascii(out_path.substr(out_path.size() - 4));
+                if (tail4 == ".lrc") out_path = out_path.substr(0, out_path.size() - 4);
+            }
+            out_path += ".json";
+        }
+        {
+            error_code ec;
+            filesystem::path op = filesystem::u8path(out_path);
+            if (op.has_parent_path()) filesystem::create_directories(op.parent_path(), ec);
+            string body;
+            js_json(scene, body, 0);
+            body += '\n';
+            ofstream f(op, ios::binary);
+            if (!f) throw runtime_error("cannot write " + out_path);
+            f.write(body.data(), (streamsize)body.size());
+            f.close();
+            if (!f) throw runtime_error("cannot write " + out_path);
+        }
+
+        printf("%s\n", out_path.c_str());
+        double fps_eff = 60.0;
+        if (scene.contains("fps") && scene["fps"].is_number()) {
+            double fv = scene["fps"].get<double>();
+            if (fv != 0) fps_eff = fv;
+        }
+        double width = 1920, height = 1080;
+        if (scene.contains("width") && scene["width"].is_number())
+            width = scene["width"].get<double>();
+        if (scene.contains("height") && scene["height"].is_number())
+            height = scene["height"].get<double>();
+        printf("  %d lines  → %ss  → %.0f frames  → %dx%d", (int)texts.size(),
+               js_num_str(duration).c_str(), duration * fps_eff, (int)width, (int)height);
+        if (!cards.empty())
+            printf("  → title card %ss→%ss", js_num_str(a.title_in.v).c_str(),
+                   js_num_str(title_out).c_str());
+        printf("\n");
+        string ti = parsed.meta.count("ti") ? parsed.meta.at("ti") : "";
+        string ar = parsed.meta.count("ar") ? parsed.meta.at("ar") : "";
+        if (!ti.empty() || !ar.empty())
+            printf("  %s%s\n", ti.c_str(), ar.empty() ? "" : (" — " + ar).c_str());
+        return 0;
+    } catch (const exception& e) {
+        fprintf(stderr, "%s\n", e.what());
+        return 1;
+    }
+}
 
 static string find_ffmpeg() {
     // cmd.exe (which popen shells out to) rejects forward slashes in the
@@ -1970,7 +3775,46 @@ static string find_ffmpeg() {
     return "ffmpeg";
 }
 
+#ifdef _WIN32
+static vector<string> utf8_argv(int argc, char** argv) {
+    vector<string> out;
+    int wargc = 0;
+    wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    if (!wargv || wargc != argc) {
+        // Extremely unlikely; keep the raw argv rather than failing to start.
+        if (wargv) LocalFree(wargv);
+        for (int i = 0; i < argc; i++) out.push_back(argv[i]);
+        return out;
+    }
+    for (int i = 0; i < wargc; i++) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+        string s(n > 1 ? (size_t)n - 1 : 0, '\0');
+        if (n > 1)
+            WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, &s[0], n, nullptr, nullptr);
+        out.push_back(move(s));
+    }
+    LocalFree(wargv);
+    return out;
+}
+#endif
+
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // cmd.exe hands argv over in the ANSI codepage; re-decode to UTF-8 so
+    // Chinese paths and text flags survive into JSON (mirrors how node
+    // receives the same bytes as UTF-16 → UTF-8).
+    static vector<string> argv_hold;
+    static vector<char*> argv_p;
+    {
+        argv_hold = utf8_argv(argc, argv);
+        for (auto& s : argv_hold) argv_p.push_back(&s[0]);
+        argv_p.push_back(nullptr);
+        argc = (int)argv_hold.size();
+        argv = argv_p.data();
+    }
+#endif
+    if (argc >= 2 && string(argv[1]) == "gen")
+        return gen_main(argc - 1, argv + 1);
     string input, audio_env_path, out = "cpp_out.mp4", png;
     float still = -1;
     unsigned from = 0, frames = 0;
@@ -1987,10 +3831,13 @@ int main(int argc, char** argv) {
     }
     if (input.empty()) {
         fprintf(stderr, "usage: chamina-cpp <scene.json> [--audio-env f] -o out.mp4 "
-                        "[--from n] [--frames n] [--still t --png f]\n");
+                        "[--from n] [--frames n] [--still t --png f]\n"
+                        "       chamina-cpp gen <song.lrc> -o scene.json [--help]\n");
         return 1;
     }
-    json scene = json::parse(ifstream(input));
+    // scene/audio-env read through read_file: MinGW's ifstream(char*) opens
+    // via the ANSI codepage and fails on Chinese paths.
+    json scene = json::parse(read_file(input));
     // The authored scene carries its settings at the root (no meta wrapper).
     json meta = scene;
     meta.erase("texts");
@@ -2008,7 +3855,7 @@ int main(int argc, char** argv) {
     World world(scene, meta);
     TRACE = getenv("CPP_TRACE") != nullptr;
     if (!audio_env_path.empty()) {
-        json ej = json::parse(ifstream(audio_env_path));
+        json ej = json::parse(read_file(audio_env_path));
         world.env.fps = ej.value("fps", 60.0f);
         for (const auto& row : ej.at("data")) world.env.data.push_back(row.get<vector<float>>());
         world.has_env = true;
@@ -2202,9 +4049,24 @@ int main(int argc, char** argv) {
         }
         static vector<uint8_t> rgb;
         finish(fr, meta, flash, rgb);
-        if (!stbi_write_png(png.c_str(), w, h, 3, rgb.data(), w * 3)) {
-            fprintf(stderr, "[cpp] ERROR: cannot write %s\n", png.c_str());
+        // stbi_write_png opens through the ANSI codepage and fails on Chinese
+        // paths; rasterize to memory and write through a wide path instead.
+        vector<uint8_t> png_bytes;
+        auto png_sink = [](void* ctx, void* data, int size) {
+            auto& buf = *(vector<uint8_t>*)ctx;
+            const uint8_t* d = (const uint8_t*)data;
+            buf.insert(buf.end(), d, d + size);
+        };
+        if (!stbi_write_png_to_func(png_sink, &png_bytes, w, h, 3, rgb.data(), w * 3)) {
+            fprintf(stderr, "[cpp] ERROR: cannot encode %s\n", png.c_str());
             return 1;
+        }
+        {
+            ofstream f(filesystem::u8path(png), ios::binary);
+            if (!f || !f.write((const char*)png_bytes.data(), (streamsize)png_bytes.size())) {
+                fprintf(stderr, "[cpp] ERROR: cannot write %s\n", png.c_str());
+                return 1;
+            }
         }
         printf("still t=%g -> %s\n", still, png.c_str());
         return 0;

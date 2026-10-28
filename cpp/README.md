@@ -1,10 +1,11 @@
 # chamina-cpp — 独立 C++ 渲染引擎
 
 整个 Chamina 的 C++ 实现：**字体解析、排版、挤出网格、动画求值、相机编排、
-软件光栅、全套音频可视化、后处理、视频编码管道**，一个约 1900 行的翻译单元
-（`src/chamina.cpp`）+ 四个 vendored 单头库。不依赖 Rust、不依赖 Node、
-不依赖浏览器、不依赖 GPU——同一份场景 JSON，与旧管线逐位等价
-（验收比值 0.97–1.03，详见 `docs/cpp-migration.md` §八）。
+软件光栅、全套音频可视化、后处理、视频编码管道，以及 LRC → 场景 JSON 生成
+（`gen` 子命令）**，一个约 3900 行的翻译单元（`src/chamina.cpp`）+
+四个 vendored 单头库。不依赖 Rust、不依赖 Node、不依赖浏览器、不依赖 GPU
+——同一份场景 JSON，与旧管线逐位等价（验收比值 0.97–1.03，
+详见 `docs/cpp-migration.md` §八）。
 
 ## 构建
 
@@ -18,6 +19,12 @@ nlohmann/json、stb_truetype、mapbox/earcut.hpp、stb_image_write。
 ## 用法
 
 ```bat
+:: LRC → 场景 JSON（lrc2scene 的 C++ 移植，输出与 node 版字节级一致）
+chamina-cpp gen scenes\bird.lrc -o scenes\bird.json
+chamina-cpp gen scenes\bird.lrc -o scenes\bird.json ^
+  --entrance fall --jitter 0.4 --title "标题" --palette "0xff88cc,#66ddff"
+:: 不支持的：--layout field、--groups auto（提示改用 node js/lrc2scene.mjs）
+
 :: 渲一段视频（rawvideo 管道 → x264，需要 ffmpeg 在 CHAMINA_FFMPEG 或 PATH）
 chamina-cpp scenes\bird.json --audio-env target\chamina\audio_env.json -o out.mp4
 chamina-cpp scenes\bird.json -o out.mp4 --from 0 --frames 300
@@ -26,9 +33,13 @@ chamina-cpp scenes\bird.json -o out.mp4 --from 0 --frames 300
 chamina-cpp scenes\bird.json --still 20.35 --png frame.png
 ```
 
-输入是 `lrc2scene` 产出的场景 JSON（字段在根级）；`--audio-env` 是
-`js/audio-env.mjs` 产出的频谱包络，给了才有频谱环/频谱条/火花/粒子呼吸
-（未给时这些组件静默关闭，其余一切照常）。
+输入是 `chamina-cpp gen`（或 `js/lrc2scene.mjs`）产出的场景 JSON（字段在根级）；
+`--audio-env` 是 `js/audio-env.mjs` 产出的频谱包络，给了才有频谱环/频谱条/
+火花/粒子呼吸（未给时这些组件静默关闭，其余一切照常）。
+
+gen 支持与 node 版相同的 CLI（entrance/jitter/wave/shake/palette/fx/
+标题副题片尾卡/相机运动/fit-width/offset/duration/fps/tail 等，详见
+`--help`）；已知偏差与未支持项见 `docs/cpp-migration.md` §十。
 
 ### 运行时开关（环境变量）
 
@@ -52,6 +63,7 @@ chamina.cpp
 ├─ 光栅器            三角形（深度+alpha）+ 加性圆点精灵；roll 烘进视基
 ├─ 可视化            彩虹频谱环×2 / 3D 频谱条 / 落词火花 / 甩镜风线
 ├─ 后处理            bloom（UnrealBloom 同构）→ DOF → ACES+sRGB → grade
+├─ gen               LRC 解析（js/lrc.js 直译）→ 场景 JSON（与 node 版字节级一致）
 └─ 管道              ffmpeg rawvideo rgb24 → libx264；静帧走 stb_image_write
 ```
 

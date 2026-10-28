@@ -187,7 +187,7 @@ OpenMP + ffmpeg 子进程。全部单头 vendored 进 cpp/vendor/，无包管理
 
 **交付前修掉的第 4 个 bug（2026-10-25 晚，用户实测「能不能渲染」暴露）**：popen 走 cmd /c，首引号被 cmd 吞（行内多引号时）+ 正斜杠路径被 cmd 拒——症状是渲染报 done 但 mp4 不落盘。修法：ffmpeg 路径统一反斜杠 + 整条命令外包一层引号（cmd /c 引号规则的官方 workaround）。150 帧样片实测落盘且画面正确。
 
-**交付（2026-10-25 终局：用户明确「只要软件，不要成片」）**：`cppuild.bat` → `distchamina-cpp.exe`（3.5MB 静态单文件，无 DLL 依赖）。
+**交付（2026-10-25 终局：用户明确「只要软件，不要成片」）**：`cpp\build.bat` → `dist\chamina-cpp.exe`（3.5MB 静态单文件，无 DLL 依赖）。
 用法/开关/架构见 `cpp/README.md`。全片渲染能力已验证可用（2.7-2.9fps）但按需执行，不再默认产出。
 
 **现在项目里有三条等价渲染通路**（同一场景 JSON → 同一画面）：
@@ -223,3 +223,73 @@ srgb/bytes 全链静态化与原地化（finish 68.9ms）、ACES fit 1D LUT（40
 73k sins）。skydome 分解：base 11.9 / 星云 19.5（fbm 9.7）/ 星点 19.8。
 视频段 5.92 fps（60 帧实测）。全部经 js/region-cmp.mjs 回归像素级零漂移
 （t=8/20.35/325 金标准 + t=12/100 新旧 A/B 均 1.000）。
+
+
+## 十、`lrc2scene` → `chamina-cpp gen` 移植（2026-10-28，字节级对齐完成）
+
+**目标**：甩掉 Node 依赖的 LRC → 场景 JSON 生成链。权威源：
+`js/lrc2scene.mjs`（792 行，CLI 语义/LOOKS 表/键序）、`js/lrc.js`（791 行，
+LRC 解析/词组/逐字时间戳）。实现在 `cpp/src/chamina.cpp` 的 gen 节
+（约 950 行），`main()` 入口 `argv[1]=="gen"` 分发。
+
+**对齐标准：与 `node js/lrc2scene.mjs <lrc> ... -o gold.json` 的
+`JSON.stringify(scene, null, 2)` 输出字节级一致**。为此不用 nlohmann 的
+`dump()`（其浮点打 `"14.0"` 而 JS 打 `"14"`），而是：
+- `nlohmann::ordered_json` 保 JS 对象键插入序——JS 对象字面量语义
+  （已存在键=原位覆盖、新键=按字面量序追加）与 `ordered_json::operator[]`
+  语义恰好一致；
+- 自写 `js_dtoa`：ECMAScript Number→String（最短往返、仅 |v|≥1e21 或
+  |v|<1e-7 用指数形式、-0→`"0"`；NaN/±Infinity 由 JSON 序列化打 `"null"`）；
+- 自写 `js_json` 递归序列化器（缩进/转义/键引号与 JSON.stringify 一致）。
+
+**必须复刻的 JS 怪癖（均有测试验证）**：
+- `clamp(null)`：`Number(null)=0` 被夹到 lo——`--fx` 单独使用时
+  flash/vignette/saturation 全为 0，是正确行为不是 bug；
+- `Math.round = floor(x+0.5)`；
+- `Math.max(NaN,x)=NaN` / `Math.min` 同理（js_max/js_min helper）；
+- `Number("")=0`（RATIO 等解析）。
+
+**LRC 解析**：按 `js/lrc.js` 正则语义手写解析器——`[mm:ss]`/`[mm:ss.xx]`
+/带分数三种时钟、负 offset、多时间戳重复行、`{e:...}` 行标签、
+`<mm:ss.xx>` 逐字时间戳、空白/无效行过滤。已验证 `charTimes.slice(0,
+text.length)` 实为 no-op（charTimes 每码点一条 ≤ UTF-16 长度）。
+parse 细节：suggestDuration 用未过滤 lines、buildLyricTexts 用过滤后
+lyricLines（next cue=下一个非空行）、firstCue 用未过滤 lines[0]。
+
+**移植范围（第一阶段）**：single 布局默认路径全量——LOOKS 表、背景
+cuts/fade、调色板、fit_width、orbit 重调、相机运动（dolly/crane/shake/
+move/yaw_drift）、标题/副题/片尾卡、fx、jitter/wave、outline、texts 键位
+语义。`--layout field` / `--groups auto`（`js/layout.mjs`，741 行）明确
+拒绝并提示改用 node；`--roll-power`/`--force-whip` 单布局下 no-op；
+`--energy-file` 接受（校验可读 + 有 data）后忽略。
+
+**验证**：自写测试 LRC（meta/offset/多时间戳/逐字/空行/{e:} 标签）+
+14 组 flag 组合（entrance×4、jitter+wave、offset/duration/fps/tail、
+fit-width、bg-look+inline palette+bg-cut+fx、fx 参数、palette+outline、
+标题/副题/片尾卡全套、dolly/crane/shake/move、keep-open/keep-camera/
+yaw-drift=0、radius）全部与 node 输出字节级一致；真实语料
+`scenes/bird.lrc`、`scenes/sample.lrc` 字节级一致（0 失败）。
+
+**移植期修掉的 bug**：
+1. argv 循环未跳过 `"gen"` token → 报 unknown argument；
+2. `match_clock` 带分数分支长度公式多加 1（`[00:05.500]` 11 字节算出
+   len=12 → substr 越界）；
+3. `NOMINMAX` 重定义需 `#ifndef` 守卫（windows.h 顺序敏感）。
+
+**Windows 坑（三个，全部修掉）**：
+1. argv 非 ASCII 损毁：`GetCommandLineW` + `CommandLineToArgvW` +
+   `WideCharToMultiByte(CP_UTF8)` 重解码 argv（为此 build.bat 加
+   `-lshell32`）；
+2. MinGW `ifstream(char*)` 走 ANSI codepage，中文路径必挂——文件读写一律
+   `filesystem::u8path(path)`；
+3. 静帧 PNG 中文输出路径——改用 `stbi_write_png_to_func` + 宽路径写出
+   （不再走 stbi_write_png 的窄路径）。
+   （仍存：ffmpeg popen 的输出文件名经 cmd /c 会损毁非 ASCII 路径——
+   已知限制，出片文件名避免中文。）
+
+**未支持/已知偏差（留待第二阶段或永久记录）**：
+- `--layout field`、`--groups auto`（js/layout.mjs layoutField）与
+  PHRASE_CUTS/WORD_SPLIT_SPECS/groupCharTimes——gen 第二阶段对象；
+- `Math.tan`/strtod 与 V8 可能差 1 ulp（影响 fit_width 最末位小数）；
+- `localeCompare` 平局退化为码点序；
+- strtod 接受 `"inf"` 而 JS `Number("inf")` 为 NaN（LRC 数值解析边界）。
