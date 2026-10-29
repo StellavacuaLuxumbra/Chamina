@@ -585,3 +585,9 @@ case_26 崩溃嫌疑）、`out[i]` 越界写、`std::max_element` **静默跳过
 (b) `undefined`/NaN 参与算术全传播、`Math.max/min` 任一 NaN 全 NaN；
 (c) `std::max_element` 之类 STL 折叠对 NaN 的行为与 JS 相反。病毒级
 语料（一本正经的可解析 LRC）+ 换种子复跑，是逼出语义差的唯一手段。
+
+**同日负结果（finish 融合试验）**：试图合并 grade/dof 的后处理趟数
+（dof mix 内联 tonemap、无-fx 直灌 pack）——像素级四路 A/B 逐字节
+相等，但配对中位测量 +1.8ms/f：tonemap 独立 pass 的自动向量化机会被
+标量混合循环破坏，省下的读写趟盖不回，已 revert（HANDOFF §3 待做 #4
+标定驳回；此结论同样封存了「pack 直灌」的变体，直到 SIMD/wgpu）。

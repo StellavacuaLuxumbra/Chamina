@@ -194,8 +194,12 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 2. ~~tonemap ACES fit 换 LUT~~（已完成：4097 级域 [0,8]，域外精确求值）
 3. ~~文字块预剔除~~（已完成：fade 窗口 ±5s，PreparedText.vis_from/vis_to，
    剔除整块 eval_all；无 fade 块永不剔除——零像素变化，t=12/100 A/B 验证）
-4. `grade()`/`dof()` 的 half-res 打包循环合并——收益变小（现在只有垂直
-   pass），靠后。
+4. ~~`grade()`/`dof()` 的 half-res 打包循环合并~~（**已像素级验证但被测驳回**
+   2026-10-29：dof mix 内联 tonemap + 无-fx 直灌 pack 两路融合，dof×fx 四
+   组合新旧二进制 PNG 逐字节相等；但配对中位测量 **+1.8ms/f**——tonemap
+   从独立的全幅 pass（编译器可向量化）被并进 dof 的标量混合热循环，失去
+   自动向量化机会，省下的 ~1 趟读写（≤1ms）盖不回。**revert，保留三
+   pass 结构**；结论：这条不再碰，直到 SIMD/wgpu（§二 接口设计）。
 5. 剩余大头：skydome base 11.9 + fbm 9.7 + 星点路径（atan2f 3ms + dd/sqrt
    ~6ms）；finish 里 grade/tonemap/pack 三趟全幅。再往下是 SIMD/wgpu（§二
    接口设计）。
