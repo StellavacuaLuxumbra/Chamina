@@ -136,7 +136,8 @@ C++ 侧则是三处 UB/语义差（越界读 → case_26 的 0xC0000474 崩溃�
 `js_max_of`/`js_min_of`（NaN 传播折叠）、flush 越界读 NaN 守卫、
 `group_char_times` 越界写改 JS 生长语义（resize 填 NaN）。
 
-**回归（全绿）**：seed 77 32/32、seed 20261028 48/48、amalgamation
+**回归（全绿）**：seed 77 32/32、seed 20261028 48/48、追加种子
+424242/9001/31337 各 32/32（**五种子累计 176 例**）、amalgamation
 9/9（dist/chamina.h 重生成，38,748 行）、渲染门禁 t=8 与历史值一致、
 t=20.35 新旧二进制 A/B 全 1.000、t=325 带内。
 
