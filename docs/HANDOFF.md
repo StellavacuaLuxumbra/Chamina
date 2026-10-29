@@ -122,6 +122,24 @@ CHAMINA_IMPLEMENTATION` 后 include 即可渲染；`cpp/src/chamina_cli.cpp`
   声明、`tmp/chamina_api.inc` API 实现；chamina.cpp 已删，此后 chamina.h
   即唯一直接编辑的引擎源），细节见 `docs/cpp-migration.md` §十三。
 
+## 0e. ✅ fuzz 第二轮 + JS 越界语义修复（2026-10-29）
+
+第二轮 fuzz（`tmp/fuzz2/harness.mjs`，打 gen 旗标面：随机可解析 LRC
+语料 × 随机旗标组合，node/C++ 双跑逐字节 + exit 对齐 + 渲染冒烟 + 错误
+路径）种子 20261028 全绿后，种子 77 抓出 2 个真 bug——详情与取证链见
+`docs/cpp-migration.md` §十五。核心：PHRASE_CUTS 的 `chunks(n,3)` 在
+窄短语时 piece 之和可超过词组长，组链越过行尾。node 的语义是
+`charTimes[i]` → undefined、`out[i]=v` 数组就地生长（char_times 多出
+一条 null）、`Math.max` 任一 NaN → 全 NaN（最终 fade_out_at=null）；
+C++ 侧则是三处 UB/语义差（越界读 → case_26 的 0xC0000474 崩溃；
+`std::max_element` 跳过 NaN → case_14 的 0.15 假正常值）。修复：
+`js_max_of`/`js_min_of`（NaN 传播折叠）、flush 越界读 NaN 守卫、
+`group_char_times` 越界写改 JS 生长语义（resize 填 NaN）。
+
+**回归（全绿）**：seed 77 32/32、seed 20261028 48/48、amalgamation
+9/9（dist/chamina.h 重生成，38,748 行）、渲染门禁 t=8 与历史值一致、
+t=20.35 新旧二进制 A/B 全 1.000、t=325 带内。
+
 ## 1. 使命与现状
 
 用户目标：**整个项目彻底 C++ 化（字体/排版/动画/渲染全重写）= 交付软件
@@ -293,10 +311,13 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    cpp-migration §十二）。
    ~~单头库化 chamina.h~~（**已完成**，2026-10-28，见 §0d 与 cpp-migration
    §十三）。~~Phase 2：完全自包含 amalgamation~~（**已完成**，2026-10-28：
-   `cpp/tools/amalgamate.cjs` → dist/chamina.h 38,719 行，验证 9/9，见
-   cpp-migration §十三）。可选自动化长跑：随机字节 LRC 语料（fuzz 面：
-   field 布局的词组切分 + whip 消耗流）。
-5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十四 与本文件。
+   `cpp/tools/amalgamate.cjs` → dist/chamina.h 38,748 行，验证 9/9，见
+   cpp-migration §十三）。~~gen 旗标面 fuzz 第二轮~~（**已完成**，
+   2026-10-29：首种子 48/48 绿后换种子抓出 JS 越界语义三连 bug，修复后
+   两种子全绿，见 §0e 与 cpp-migration §十五；harness 不入库，修复在
+   chamina.h）。gen 至此全量接管 node lrc2scene 且两轮 fuzz 验收；
+   可选自动化长跑：更多种子轮跑（同一 harness）。
+5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十五 与本文件。
 
 ## 8. 用户偏好（长期有效）
 

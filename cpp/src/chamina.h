@@ -2085,6 +2085,19 @@ static double js_min(double a, double b) {
     if (isnan(a) || isnan(b)) return numeric_limits<double>::quiet_NaN();
     return a < b ? a : b;
 }
+// Math.max(...arr) / Math.min(...arr): a NaN anywhere poisons the whole call
+// (unlike std::max_element, which skips comparators against NaN). Anywhere the
+// JS folds a possibly-NaN array through the spread, use these.
+static double js_max_of(const vector<double>& a) {
+    double acc = -numeric_limits<double>::infinity();
+    for (double v : a) acc = js_max(acc, v);
+    return acc;
+}
+static double js_min_of(const vector<double>& a) {
+    double acc = numeric_limits<double>::infinity();
+    for (double v : a) acc = js_min(acc, v);
+    return acc;
+}
 
 // One UTF-8 codepoint at i (invalid bytes pass through as themselves).
 static uint32_t utf8_cp(const string& s, size_t i, size_t& len) {
@@ -2912,7 +2925,13 @@ static vector<WordGroup> word_groups(const string& text, const vector<double>& c
         size_t i = phrase_start;
         for (int piece : cut((int)len)) {
             if (piece <= 0) continue;
-            out.push_back({(int)i, (int)(i + piece), char_times[i], kind});
+            // charTimes[i] can be undefined: the piece sum may run past the
+            // line when chunks(...) filters to a longer run. undefined joins
+            // later arithmetic as NaN (same as storing NaN directly).
+            double t0 = i < char_times.size()
+                            ? char_times[i]
+                            : numeric_limits<double>::quiet_NaN();
+            out.push_back({(int)i, (int)(i + piece), t0, kind});
             i += piece;
         }
         phrase_index += 1;
@@ -2938,7 +2957,15 @@ static vector<double> group_char_times(const string& text, const vector<double>&
     if (gs.empty()) return ct;
     vector<double> out = ct;
     for (const auto& g : gs)
-        for (int i = g.i0; i < g.i1; i++) out[i] = g.t + (i - g.i0) * 0.035;
+        for (int i = g.i0; i < g.i1; i++) {
+            // A JS array grows in place on out[i] = v when i == length: piece
+            // sums can run past the source stamps, extending the sweep by one
+            // entry per group tail (a hole would read undefined → NaN, so fill
+            // the vector with NaN the same way).
+            if ((size_t)i >= out.size())
+                out.resize((size_t)i + 1, numeric_limits<double>::quiet_NaN());
+            out[i] = g.t + (i - g.i0) * 0.035;
+        }
     return out;
 }
 
@@ -3423,8 +3450,9 @@ static FieldLayout layout_field(const vector<LrcLine>& lines, const ojson& camer
         box_w[i] = width / 2;
         box_h[i] = resolved * 0.55;  // half the em box + rim/bloom margin
         const vector<double>* ctp = lines[i].has_ct ? &lines[i].ct : nullptr;
-        reveal_end[i] = ctp && !ctp->empty() ? *max_element(ctp->begin(), ctp->end())
-                                             : cues[i];
+        reveal_end[i] = ctp && !ctp->empty()
+                            ? js_max_of(*ctp)   // Math.max(...charTimes)
+                            : cues[i];
     }
 
     // Return to the title framing before the outro.
@@ -3897,7 +3925,8 @@ static vector<ojson> build_lyric_texts(const vector<LrcLine>& lines, const Lyric
                 for (double v : g) ct.push_back(round3(v));
             }
         }
-        double last_glyph = has_ct && !ct.empty() ? *max_element(ct.begin(), ct.end()) : t;
+        double last_glyph = has_ct && !ct.empty() ? js_max_of(ct)   // Math.max
+                                                  : t;
         double next_raw = i + 1 < lines.size() ? lines[i + 1].time + offset : total;
         double next = isfinite(next_raw) ? next_raw : t + 3.0;
         // Never let a line outlive the next cue; always leave room to fade.
@@ -4485,8 +4514,8 @@ static vector<double> load_energy(const string& path, const vector<LrcLine>& lin
         }
         raw.push_back(n ? sum / n : 0.0);
     }
-    double mn = *min_element(raw.begin(), raw.end());
-    double mx = *max_element(raw.begin(), raw.end());
+    double mn = js_min_of(raw);  // Math.min(...raw)
+    double mx = js_max_of(raw);
     double span = mx - mn > 1e-9 ? mx - mn : 1.0;
     vector<double> out;
     for (double v : raw) out.push_back(round3((v - mn) / span));

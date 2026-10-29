@@ -530,3 +530,58 @@ sample.lrc 4 组合（field / +groups / +whip / +outro）、keep-camera+field
 field 场景经 C++ 渲染端实渲 t=20 与 whip 段 t=8.4 两张静帧无崩溃
 （stops=34 = 33 行 + 收尾回题景）；渲染端门禁 t=8 四分数与 fuzz 48/48
 复验无变化。
+
+## 十五、fuzz 第二轮与 JS 越界语义修复（2026-10-29，_gen 语法面的真实案件）
+
+**第一轮 fuzz（§0c）打的是构造畸形输入；第二轮（tmp/fuzz2）打的是
+gen 的旗标面**：随机可解析 LRC 语料（含 `決して`/全角空格/`词，词`
+等边缘片段）× 随机旗标组合（--layout/--groups/--roll-power/--force-whip/
+--offset/--outro-at/--keep-open/--entrance/--energy-file…），node
+lrc2scene.mjs 与 C++ gen 双跑逐字节比对 + exit 对齐，另加 8 例渲染冒烟
+与 4 例错误路径（tmp/fuzz2/harness.mjs，旗标落盘 flags_case_k.json）。
+
+- **首种子 20261028：48/48 全绿**。换种子 77（32 例）抓到 2 个失败——
+  第一批 fuzz 只打自身，换种子才见真伤。
+- **case_14**（`--layout field --groups auto --offset -1583`）：
+  fade_out_at node `null` vs cpp `0.15`。
+- **case_26**（`--layout field --groups auto --outro-at 88.52… --keep-open`）：
+  cpp 直接崩（exit 3221226356 = 0xC0000474 fail-fast），node exit 0。
+
+**取证链（tmp/fuzz2 插桩：lrc_dbg.mjs 是带 GCT 探针的 lrc.js 副本）**：
+语料行 `飞鸟 过往 风雨 词　词  不是词 了  在`（22 码点、22 戳）。
+PHRASE_CUTS 的 `chunks(n,3)` 在 n=1 时产出 `[-1,1,1]`→filter(>0) 后
+`[1,1]`——**piece 之和 2 > 短语长 1**，组链推进越过行尾（i0=22）：
+
+1. `wordGroups` flush 的 `t: charTimes[i]` **越界读 → `undefined`**；
+2. `groupCharTimes` 的 `out[i] = g.t + (i-g.i0)*0.035` 在 i=22 处
+   `undefined + 0 = NaN`，且 **JS 数组就地生长**：场景 char_times 变
+   **23 条、末位 null**；
+3. `Math.max(...charTimes)` **任一 NaN → 全 NaN** → lastGlyph/outAt =
+   NaN → `JSON.stringify(NaN)` → `fade_out_at: null`；
+4. layoutField 侧 `revealEnd = g.t + …` 同样 NaN → exit 扫描
+   `t=NaN` 不起步 → exits `null`（两个 NaN 源汇合，一定写 null）。
+
+C++ 侧对应三处全是 UB/语义差：`char_times[i]` 越界读（堆邻域脏值→
+case_26 崩溃嫌疑）、`out[i]` 越界写、`std::max_element` **静默跳过 NaN**
+（NaN 与比较器恒 false）→ lastGlyph 停在次元戳上，outAt 居然算出
+0.15 这种「正常值」，所以 diff 是 0.15 vs null 而不是 NaN vs null。
+
+**修复（chamina.h，均按 JS 逐字语义）**：
+- 新增 `js_max_of`/`js_min_of` 折叠（任一 NaN → NaN），替换
+  `max_element`/`min_element` 三处（buildLyricTexts 的 last_glyph、
+  layout_field 的 reveal_end、loadEnergy 的 mn/mx）；
+- `word_groups` flush：`i < ct.size() ? ct[i] : NaN`（undefined 参与
+  后续算术 ≡ NaN）；
+- `group_char_times`：越界写改为 **JS 生长语义**（`resize(i+1)`，中洞
+  填 NaN——undefined 的算术等价物）。
+
+**验证**：repro77 c14 全等（1625 行逐字节）、c26 exit 0；seed 77
+32/32 与 seed 20261028 48/48 全绿；amalgamation 重跑 9/9；
+渲染门禁 t=8 与历史值一致（1.005/1.014/1.030/1.020）、t=20.35 新旧
+二进制同刻 A/B 全比率 1.000、t=325 带内——改动只在 gen 词法路径，
+渲染器零涉及。
+
+**小结**：JS 的三条隐藏语义必须逐字复刻——(a) `arr[i]=v` 就地生长；
+(b) `undefined`/NaN 参与算术全传播、`Math.max/min` 任一 NaN 全 NaN；
+(c) `std::max_element` 之类 STL 折叠对 NaN 的行为与 JS 相反。病毒级
+语料（一本正经的可解析 LRC）+ 换种子复跑，是逼出语义差的唯一手段。
