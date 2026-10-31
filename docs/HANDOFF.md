@@ -185,9 +185,9 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 |---|---|---|---|
 | render | 138ms | **64.3ms** | skydome 半分辨率+LUT；格点 hash/星点胞/闪烁查表 |
 | 　skydome | 132ms | **52.8ms** | base 11.9 / 星云 19.5 / 星点 19.8（桩阶梯分解）|
-| finish | 168ms | **68.9ms** | sRGB LUT、bloom 级联上采样、blur 缓冲复用+跳死代码水平 pass、ACES fit LUT、全链静态缓冲/原地化 |
+| finish | 168ms | **66.9ms**（fx-on bird，2026-10-31 SIMD 批配对中位；基线复测 96.6） | sRGB LUT、bloom 级联上采样、blur 缓冲复用+跳死代码水平 pass、ACES fit LUT、全链静态缓冲/原地化；**AVX2 tonemap/grade 内核 + pack 并行（位精确）** |
 | 帧分配 | — | 已省 | Frame 复用、color 跳清屏（已验证）、文字块窗口预剔除 |
-| 视频段 | 3.25 fps | **5.92 fps** | 60 帧段实测（--from 570）|
+| 视频段 | 3.25 fps | **5.26 fps**（同窗交替配对 60 帧×3 轮，基线 4.79） | ~~SIMD stage 1~~ |
 
 **待做优化（按性价比排序）**：
 1. ~~bloom 5 级 blur 的每帧 tmp+out 分配~~（已完成：blur_into 静态缓冲 +
@@ -201,9 +201,12 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
    从独立的全幅 pass（编译器可向量化）被并进 dof 的标量混合热循环，失去
    自动向量化机会，省下的 ~1 趟读写（≤1ms）盖不回。**revert，保留三
    pass 结构**；结论：这条不再碰，直到 SIMD/wgpu（§二 接口设计）。
-5. 剩余大头：skydome base 11.9 + fbm 9.7 + 星点路径（atan2f 3ms + dd/sqrt
-   ~6ms）；finish 里 grade/tonemap/pack 三趟全幅。再往下是 SIMD/wgpu（§二
-   接口设计）。
+5. ~~finish 里 grade/tonemap/pack 三趟全幅~~（**已完成**，2026-10-31：AVX2
+   Tier A 位精确内核，字节 8/8 全等，finish 配对中位 fx-on 96.6→66.9 /
+   fx-off 86.8→61.0；旧二进制口径 -29.7ms，见 cpp-migration §十六）。
+   剩余大头：skydome base 11.9 + fbm 9.7 + 星点路径（atan2f 3ms + dd/sqrt
+   ~6ms）的向量半——先 Tier A（normalize/sink sqrt、LUT lerp），超函数
+   （atan2/sin）走 Tier B region 门禁。分发层/政策见 cpp-migration §十六。
 
 ## 4. 已修 bug 清单（防回归，改相关代码前先读）
 
@@ -316,13 +319,22 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    cpp-migration §十二）。
    ~~单头库化 chamina.h~~（**已完成**，2026-10-28，见 §0d 与 cpp-migration
    §十三）。~~Phase 2：完全自包含 amalgamation~~（**已完成**，2026-10-28：
-   `cpp/tools/amalgamate.cjs` → dist/chamina.h 38,748 行，验证 9/9，见
+   `cpp/tools/amalgamate.cjs` → dist/chamina.h，验证 9/9，见
    cpp-migration §十三）。~~gen 旗标面 fuzz 第二轮~~（**已完成**，
    2026-10-29：首种子 48/48 绿后换种子抓出 JS 越界语义三连 bug，修复后
    两种子全绿，见 §0e 与 cpp-migration §十五；harness 不入库，修复在
    chamina.h）。gen 至此全量接管 node lrc2scene 且两轮 fuzz 验收；
-   可选自动化长跑：更多种子轮跑（同一 harness）。
-5. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十五 与本文件。
+   fuzz 第三面（stamp 宽域 + astral/emoji）也已全绿，累计 304/304
+   （cpp-migration §十五）。
+5. ~~SIMD/wgpu 大项立接口~~（**已完成**，2026-10-31，见 cpp-migration
+   §十六）：AVX2 运行时分发（target_clones 在 PE 不可用→手工函数指针）、
+   Tier A 位精确双内核（tonemap/grade）+ pack 并行，字节门禁 8/8 全等，
+   finish 96.6→66.9ms（bird 配对）。**后续子项**：
+   skydome 全幅 Tier A（normalize/sink sqrt、LUT lerp）→ 星点 atan2f/
+   fbm sinf 的 Tier B 向量多项式（走 region 门禁 ±0.05）→ 可选 byte-pack
+   打包内核；wgpu 后端按同签名帧函数段前缀，暂不引入。
+6. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十六 与本文件。
+   可选：更多 fuzz 种子长跑；editor（Web GUI）低优先级。
 
 ## 8. 用户偏好（长期有效）
 

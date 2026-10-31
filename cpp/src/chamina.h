@@ -1973,32 +1973,352 @@ static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// SIMD dispatch: AVX2 kernels selected at runtime, scalar everywhere else.
+//
+// Toolchain facts (verified in tmp/probe_attr.cpp / probe_fma2.cpp): GCC's
+// target_clones needs ifunc, which PE binaries do not support — so each hot
+// kernel ships as a scalar/vector pair, the vector half compiled under
+// __attribute__((target("avx2"))) and picked once through
+// __builtin_cpu_supports into a function pointer. Non-GNU hosts and
+// CHAMINA_NO_SIMD=1 (paired-perf switch) land on the scalar path.
+//
+// Numerics contract (Tier A, byte gate): every lane runs the scalar body's
+// exact op sequence — no reassociation, no fma contraction (the scalar
+// baseline has no FMA ISA, so the kernels pin -ffp-contract=off), hardware
+// sqrt/divide, and LUT gathers that read the same table entries at the same
+// clamped indices. Any drift would change render bytes immediately, which
+// the still-image A/B gate catches.
+// ---------------------------------------------------------------------------
+// x86_64 + GNU-family only: PE targets have no ifunc, so there is no
+// target_clones — dispatch is a manual function-pointer pick (see below).
+#if (defined(__x86_64__) || defined(_M_X64)) && (defined(__GNUC__) || defined(__clang__))
+#define CHAMINA_SIMD_AVX2 1
+// immintrin's declarations are macro-guarded on __AVX__ at include time; the
+// default build is SSE2 baseline, so include it once inside an AVX2 codegen
+// window and restore. The kernels themselves re-mark target("avx2").
+#pragma GCC push_options
+#pragma GCC target("avx2")
+#include <immintrin.h>
+#pragma GCC pop_options
+#endif
+
+#if CHAMINA_SIMD_AVX2
+static inline bool simd_off() {
+    static bool v = getenv("CHAMINA_NO_SIMD") != nullptr;
+    return v;
+}
+static inline bool simd_have_avx2() {
+    static bool v = [] {
+        __builtin_cpu_init();
+        return __builtin_cpu_supports("avx2") != 0;
+    }();
+    return v;
+}
+static inline bool simd_avx2() { return !simd_off() && simd_have_avx2(); }
+#endif
+
+// ---------------------------------------------------------------------------
+// ACES tonemap + sRGB encode, full-frame pixel stream. Lane-for-lane
+// transcription of tonemap_srgb/srgb_encode_lut/aces_fit: same tables, same
+// op order per lane, same (int) truncations. Out-of-band lanes (v<=0, v>=8)
+// carry dead gather values that the blends discard; their gather indices are
+// clamped so gathers never leave the 4097-entry tables. NaN inputs are
+// invalid-scene territory (the byte gate never feeds them).
+// ---------------------------------------------------------------------------
+
+// Full-post tonemap over a contiguous pixel range (AoS float3 in and out).
+static void tonemap_rows_scalar(const float* src, float* dst, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        array<float, 3> c = {src[i * 3], src[i * 3 + 1], src[i * 3 + 2]};
+        array<float, 3> o = tonemap_srgb(c);
+        dst[i * 3] = o[0];
+        dst[i * 3 + 1] = o[1];
+        dst[i * 3 + 2] = o[2];
+    }
+}
+
+using tonemap_kfn = void (*)(const float* src, float* dst, size_t n);
+
+#if CHAMINA_SIMD_AVX2
+
+// srgb_encode_lut across lanes: x = clamp(v,0,1)*4096; the scalar clamps i
+// BEFORE taking the fractional part ("if (i > 4095) i = 4095; f = x - i").
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 srgb_encode_lanes256(__m256 v, const float* lut) {
+    __m256 x = _mm256_min_ps(_mm256_max_ps(v, _mm256_setzero_ps()), _mm256_set1_ps(1.0f)) *
+               _mm256_set1_ps(4096.0f);
+    __m256i iu = _mm256_cvttps_epi32(x);
+    __m256i ic = _mm256_min_epi32(iu, _mm256_set1_epi32(4095));
+    __m256 f = x - _mm256_cvtepi32_ps(ic);
+    __m256i ib = _mm256_min_epi32(_mm256_add_epi32(ic, _mm256_set1_epi32(1)),
+                                  _mm256_set1_epi32(4096));
+    __m256 l0 = _mm256_i32gather_ps(lut, ic, 4);
+    __m256 l1 = _mm256_i32gather_ps(lut, ib, 4);
+    return (l1 - l0) * f + l0;
+}
+
+// aces_fit across lanes (mirrors aces_fit above): v<=0 → lut[0]; v>=8 → the
+// exact rational; else LUT lerp with f taken from the UNclamped i.
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 aces_fit_lanes256(__m256 v, const float* lut) {
+    __m256 x = v * _mm256_set1_ps(4096.0f / 8.0f);
+    __m256i ix = _mm256_cvttps_epi32(x);
+    __m256 f = x - _mm256_cvtepi32_ps(ix);
+    // gather indices stay inside [0,4096]; in-band lanes (0<v<8) need no clamp
+    __m256i ia = _mm256_min_epi32(_mm256_max_epi32(ix, _mm256_setzero_si256()),
+                                  _mm256_set1_epi32(4095));
+    __m256i ib = _mm256_min_epi32(_mm256_add_epi32(ia, _mm256_set1_epi32(1)),
+                                  _mm256_set1_epi32(4096));
+    __m256 l0 = _mm256_i32gather_ps(lut, ia, 4);
+    __m256 l1 = _mm256_i32gather_ps(lut, ib, 4);
+    __m256 res = (l1 - l0) * f + l0;
+    // v >= 8: the exact rational tail, same op order as the scalar branch
+    __m256 num = v * (v + _mm256_set1_ps(0.0245786f)) - _mm256_set1_ps(0.000090537f);
+    __m256 den = v * (_mm256_set1_ps(0.983729f) * v + _mm256_set1_ps(0.4329510f)) +
+                 _mm256_set1_ps(0.238081f);
+    res = _mm256_blendv_ps(res, num / den, _mm256_cmp_ps(v, _mm256_set1_ps(8.0f), _CMP_GE_OQ));
+    return _mm256_blendv_ps(res, _mm256_set1_ps(lut[0]),
+                            _mm256_cmp_ps(v, _mm256_setzero_ps(), _CMP_LE_OQ));
+}
+
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static void tonemap_rows_avx2(const float* src, float* dst, size_t n) {
+    const float* lutA = aces_lut();
+    const float* lutS = srgb_lut();
+    const __m256i kstride = _mm256_setr_epi32(0, 3, 6, 9, 12, 15, 18, 21);
+    const __m256i kone = _mm256_set1_epi32(1);
+    const __m256i ktwo = _mm256_add_epi32(kone, kone);
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256i base = _mm256_add_epi32(kstride, _mm256_set1_epi32((int)(i * 3)));
+        __m256 c0 = _mm256_i32gather_ps(src, base, 4);
+        __m256 c1 = _mm256_i32gather_ps(src, _mm256_add_epi32(base, kone), 4);
+        __m256 c2 = _mm256_i32gather_ps(src, _mm256_add_epi32(base, ktwo), 4);
+        // fitted[j] = c0*M[j][0] + c1*M[j][1] + c2*M[j][2], mul/add order unchanged
+        __m256 f0 = (c0 * _mm256_set1_ps(0.59719f) + c1 * _mm256_set1_ps(0.07600f)) +
+                    c2 * _mm256_set1_ps(0.02840f);
+        __m256 f1 = (c0 * _mm256_set1_ps(0.35458f) + c1 * _mm256_set1_ps(0.90834f)) +
+                    c2 * _mm256_set1_ps(0.13383f);
+        __m256 f2 = (c0 * _mm256_set1_ps(0.04823f) + c1 * _mm256_set1_ps(0.01566f)) +
+                    c2 * _mm256_set1_ps(0.83777f);
+        f0 = aces_fit_lanes256(f0, lutA);
+        f1 = aces_fit_lanes256(f1, lutA);
+        f2 = aces_fit_lanes256(f2, lutA);
+        // v[i] = clamp(f0*MO[i][0] + f1*MO[i][1] + f2*MO[i][2], 0, 1) → srgb LUT
+        __m256 v0 = ((f0 * _mm256_set1_ps(1.60475f) + f1 * _mm256_set1_ps(-0.10208f)) +
+                     f2 * _mm256_set1_ps(-0.00327f));
+        __m256 v1 = ((f0 * _mm256_set1_ps(-0.53108f) + f1 * _mm256_set1_ps(1.10813f)) +
+                     f2 * _mm256_set1_ps(-0.07276f));
+        __m256 v2 = ((f0 * _mm256_set1_ps(-0.07367f) + f1 * _mm256_set1_ps(-0.00605f)) +
+                     f2 * _mm256_set1_ps(1.07602f));
+        v0 = srgb_encode_lanes256(v0, lutS);
+        v1 = srgb_encode_lanes256(v1, lutS);
+        v2 = srgb_encode_lanes256(v2, lutS);
+        // interleave (AoS) and store: 8 pixels × 3 floats, contiguous slice
+        alignas(32) float tmp[24];
+        _mm256_store_ps(tmp + 0, v0);
+        _mm256_store_ps(tmp + 8, v1);
+        _mm256_store_ps(tmp + 16, v2);
+        float* o = dst + i * 3;
+        for (int p = 0; p < 8; p++) {
+            o[p * 3] = tmp[p];
+            o[p * 3 + 1] = tmp[8 + p];
+            o[p * 3 + 2] = tmp[16 + p];
+        }
+    }
+    if (i < n) tonemap_rows_scalar(src + i * 3, dst + i * 3, n - i);
+}
+#endif  // CHAMINA_SIMD_AVX2
+
+static tonemap_kfn tonemap_kernel() {
+    static tonemap_kfn fn =
+#if CHAMINA_SIMD_AVX2
+        simd_avx2() ? &tonemap_rows_avx2 :
+#endif
+        &tonemap_rows_scalar;
+    return fn;
+}
+
+// Full-frame tonemap driver. Chunking keeps contiguous 8-pixel lane groups
+// per thread and mirrors OpenMP static scheduling, so per-stage profiling
+// stays comparable across runs.
+static void tonemap_into(const float* src, float* dst, size_t n) {
+    if (n == 0) return;
+    tonemap_kfn fn = tonemap_kernel();
+    size_t blocks = n / 8;  // whole lane groups travel together; tail stays serial
+#ifdef _OPENMP
+    if (blocks >= 32) {
+#pragma omp parallel
+        {
+            int T = omp_get_num_threads(), tk = omp_get_thread_num();
+            size_t b = (blocks * tk) / T, e = (blocks * (tk + 1)) / T;
+            if (b < e) fn(src + b * 24, dst + b * 24, (e - b) * 8);
+        }
+        return;
+    }
+#endif
+    fn(src, dst, n);
+}
+
+// ---------------------------------------------------------------------------
+// grade (chromatic / vignette / saturation / flash), full frame. The lane
+// transcription keeps divides and sqrtfs — vx/y division and sqrt are exact
+// in hardware, so the values stay bit-identical to the scalar body.
+// ---------------------------------------------------------------------------
+
+// Scalar seed: one pixel, verbatim transcription of the original per-pixel
+// body. Shared by the scalar row kernel and the AVX2 tail.
+static inline void grade_px(const float* src, int w, int h, int x, int y, float chromatic,
+                            float vignette, float saturation, float flash, float* out) {
+    float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
+    float cx = u - 0.5f, cy = v - 0.5f;
+    float r2 = cx * cx + cy * cy;
+    float k = chromatic * (0.35f + r2 * 2.4f);
+    auto sample = [&](float du, float dv, int ch) {
+        int sx = clamp((int)(((u + du) * w)), 0, w - 1);
+        int sy = clamp((int)(((v + dv) * h)), 0, h - 1);
+        return src[((size_t)sy * w + (size_t)sx) * 3 + ch];
+    };
+    array<float, 3> col = {sample(cx * k, cy * k, 0), sample(0, 0, 1),
+                           sample(-cx * k, -cy * k, 2)};
+    float l = 0.2126f * col[0] + 0.7152f * col[1] + 0.0722f * col[2];
+    for (auto& c : col) c = l + (c - l) * saturation;
+    float rad = clamp(sqrtf(r2) * 1.45f, 0.0f, 1.0f);
+    for (auto& c : col) {
+        c *= 1 - vignette * rad * rad;
+        c += (1 - c) * clamp(flash, 0.0f, 1.0f);
+    }
+    out[((size_t)y * w + x) * 3] = col[0];
+    out[((size_t)y * w + x) * 3 + 1] = col[1];
+    out[((size_t)y * w + x) * 3 + 2] = col[2];
+}
+
+static void grade_rows_scalar(const float* src, int w, int h, int y0, int y1, float chromatic,
+                              float vignette, float saturation, float flash, float* out) {
+    for (int y = y0; y < y1; y++)
+        for (int x = 0; x < w; x++)
+            grade_px(src, w, h, x, y, chromatic, vignette, saturation, flash, out);
+}
+
+using grade_kfn = void (*)(const float* src, int w, int h, int y0, int y1, float chromatic,
+                           float vignette, float saturation, float flash, float* out);
+
+#if CHAMINA_SIMD_AVX2
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static void grade_rows_avx2(const float* src, int w, int h, int y0, int y1, float chromatic,
+                            float vignette, float saturation, float flash, float* out) {
+    const __m256 half = _mm256_set1_ps(0.5f);
+    const __m256i kzero = _mm256_setzero_si256();
+    const __m256i kw1 = _mm256_set1_epi32(w - 1);
+    const __m256i kh1 = _mm256_set1_epi32(h - 1);
+    const __m256i k3 = _mm256_set1_epi32(3);
+    const __m256i klanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    for (int y = y0; y < y1; y++) {
+        const float v = (y + 0.5f) / h;
+        const float cy = v - 0.5f;
+        const float cyy = cy * cy;                      // broadcast lane value
+        const float cyk_c = cy;                          // dv = cy * k needs cy, not cy²
+        const int sy1 = clamp((int)(((v + 0.0f) * h)), 0, h - 1);  // center sample row, per row
+        const __m256 vb = _mm256_set1_ps(v);
+        const __m256 cyyb = _mm256_set1_ps(cyy);
+        const __m256 cyb = _mm256_set1_ps(cyk_c);
+        const __m256 chw = _mm256_set1_ps(chromatic);
+        int x = 0;
+        for (; x + 8 <= w; x += 8) {
+            __m256 xf = _mm256_cvtepi32_ps(_mm256_add_epi32(klanes, _mm256_set1_epi32(x)));
+            __m256 u = (xf + half) / _mm256_set1_ps((float)w);   // exact per-lane divide
+            __m256 cx = u - half;
+            __m256 r2 = cx * cx + cyyb;                          // (cx*cx) + (cy*cy)
+            __m256 kk = chw * (_mm256_set1_ps(0.35f) + r2 * _mm256_set1_ps(2.4f));
+            __m256 duk = cx * kk;                    // du = cx * k
+            __m256 dvk = cyb * kk;                   // dv = cy * k
+            // sample(cx*k, cy*k, 0)
+            __m256 u0 = (u + duk) * _mm256_set1_ps((float)w);
+            __m256 v0 = (vb + dvk) * _mm256_set1_ps((float)h);
+            // sample(-cx*k, -cy*k, 2): u + (−a) ≡ u − a bitwise
+            __m256 u2 = (u - duk) * _mm256_set1_ps((float)w);
+            __m256 v2 = (vb - dvk) * _mm256_set1_ps((float)h);
+            // center sample (du=dv=0, ch=1): sx per lane, sy hoisted per row
+            __m256 uc = u * _mm256_set1_ps((float)w);
+            __m256i s0x = _mm256_cvttps_epi32(u0);
+            __m256i s0y = _mm256_cvttps_epi32(v0);
+            __m256i s2x = _mm256_cvttps_epi32(u2);
+            __m256i s2y = _mm256_cvttps_epi32(v2);
+            __m256i scx = _mm256_cvttps_epi32(uc);
+            s0x = _mm256_min_epi32(_mm256_max_epi32(s0x, kzero), kw1);
+            s0y = _mm256_min_epi32(_mm256_max_epi32(s0y, kzero), kh1);
+            s2x = _mm256_min_epi32(_mm256_max_epi32(s2x, kzero), kw1);
+            s2y = _mm256_min_epi32(_mm256_max_epi32(s2y, kzero), kh1);
+            scx = _mm256_min_epi32(_mm256_max_epi32(scx, kzero), kw1);
+            __m256i i0 = _mm256_mullo_epi32(_mm256_add_epi32(_mm256_mullo_epi32(s0y, _mm256_set1_epi32(w)), s0x), k3);
+            __m256i i2 = _mm256_mullo_epi32(_mm256_add_epi32(_mm256_mullo_epi32(s2y, _mm256_set1_epi32(w)), s2x), k3);
+            __m256i i1 = _mm256_mullo_epi32(_mm256_add_epi32(_mm256_mullo_epi32(_mm256_set1_epi32(sy1), _mm256_set1_epi32(w)), scx), k3);
+            __m256 col0 = _mm256_i32gather_ps(src, i0, 4);
+            __m256 col1 = _mm256_i32gather_ps(src, _mm256_add_epi32(i1, _mm256_set1_epi32(1)), 4);
+            __m256 col2 = _mm256_i32gather_ps(src, _mm256_add_epi32(i2, _mm256_set1_epi32(2)), 4);
+            __m256 l = (col0 * _mm256_set1_ps(0.2126f) + col1 * _mm256_set1_ps(0.7152f)) +
+                       col2 * _mm256_set1_ps(0.0722f);
+            const __m256 sat = _mm256_set1_ps(saturation);
+            col0 = (col0 - l) * sat + l;
+            col1 = (col1 - l) * sat + l;
+            col2 = (col2 - l) * sat + l;
+            __m256 rad = _mm256_min_ps(
+                _mm256_max_ps(_mm256_sqrt_ps(r2) * _mm256_set1_ps(1.45f), _mm256_setzero_ps()),
+                _mm256_set1_ps(1.0f));
+            // c *= 1 - vignette*rad*rad   (scalar order: (vig*rad)*rad, then 1-…)
+            __m256 vig = _mm256_set1_ps(1.0f) - _mm256_set1_ps(vignette) * rad * rad;
+            const __m256 fl = _mm256_set1_ps(clamp(flash, 0.0f, 1.0f));
+            col0 = col0 * vig;
+            col1 = col1 * vig;
+            col2 = col2 * vig;
+            // c += (1 - c) * flash
+            col0 = col0 + (_mm256_set1_ps(1.0f) - col0) * fl;
+            col1 = col1 + (_mm256_set1_ps(1.0f) - col1) * fl;
+            col2 = col2 + (_mm256_set1_ps(1.0f) - col2) * fl;
+            alignas(32) float tmp[24];  // SoA-ish scratch then interleave-copy
+            _mm256_store_ps(tmp + 0, col0);
+            _mm256_store_ps(tmp + 8, col1);
+            _mm256_store_ps(tmp + 16, col2);
+            float* o = out + ((size_t)y * w + x) * 3;
+            for (int p = 0; p < 8; p++) {
+                o[p * 3] = tmp[p];
+                o[p * 3 + 1] = tmp[8 + p];
+                o[p * 3 + 2] = tmp[16 + p];
+            }
+        }
+        for (int xi = x; xi < w; xi++)
+            grade_px(src, w, h, xi, y, chromatic, vignette, saturation, flash, out);
+    }
+}
+#endif
+
+static grade_kfn grade_kernel() {
+    static grade_kfn fn =
+#if CHAMINA_SIMD_AVX2
+        simd_avx2() ? &grade_rows_avx2 :
+#endif
+        &grade_rows_scalar;
+    return fn;
+}
+
 static void grade_into(const Img& src, int w, int h, float chromatic, float vignette,
                        float saturation, float flash, Img& out) {
     if ((size_t)w * h > out.size()) out.resize((size_t)w * h);
-#pragma omp parallel for schedule(static)
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++) {
-            float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
-            float cx = u - 0.5f, cy = v - 0.5f;
-            float r2 = cx * cx + cy * cy;
-            float k = chromatic * (0.35f + r2 * 2.4f);
-            auto sample = [&](float du, float dv, int ch) {
-                int sx = clamp((int)(((u + du) * w)), 0, w - 1);
-                int sy = clamp((int)(((v + dv) * h)), 0, h - 1);
-                return src[(size_t)sy * w + sx][ch];
-            };
-            array<float, 3> col = {sample(cx * k, cy * k, 0), sample(0, 0, 1),
-                                   sample(-cx * k, -cy * k, 2)};
-            float l = 0.2126f * col[0] + 0.7152f * col[1] + 0.0722f * col[2];
-            for (auto& c : col) c = l + (c - l) * saturation;
-            float rad = clamp(sqrtf(cx * cx + cy * cy) * 1.45f, 0.0f, 1.0f);
-            for (auto& c : col) {
-                c *= 1 - vignette * rad * rad;
-                c += (1 - c) * clamp(flash, 0.0f, 1.0f);
-            }
-            out[(size_t)y * w + x] = col;
-        }
+    if (w <= 0 || h <= 0) return;
+    grade_kfn fn = grade_kernel();
+#ifdef _OPENMP
+#pragma omp parallel
+    {
+        int T = omp_get_num_threads(), tk = omp_get_thread_num();
+        int y0 = (int)((long long)h * tk / T), y1 = (int)((long long)h * (tk + 1) / T);
+        if (y0 < y1)
+            fn(src.data()[0].data(), w, h, y0, y1, chromatic, vignette, saturation, flash,
+               out.data()[0].data());
+    }
+#else
+    fn(src.data()[0].data(), w, h, 0, h, chromatic, vignette, saturation, flash, out.data()[0].data());
+#endif
 }
 
 // Full post chain, in place on f.color (safe: both paths consume the result
@@ -2025,8 +2345,7 @@ static void finish(Frame& f, const json& meta, float flash, vector<uint8_t>& byt
     }
     static Img srgb;
     if ((size_t)w * h > srgb.size()) srgb.resize((size_t)w * h);
-#pragma omp parallel for schedule(static)
-    for (long i = 0; i < (long)f.color.size(); i++) srgb[i] = tonemap_srgb(f.color[i]);
+    tonemap_into((const float*)f.color.data(), (float*)srgb.data(), f.color.size());
     const Img* packed_src = &srgb;
     if (meta.value("fx", json::object()).value("enabled", false)) {
         auto& fx = meta.at("fx");
@@ -2037,9 +2356,12 @@ static void finish(Frame& f, const json& meta, float flash, vector<uint8_t>& byt
     }
     bytes.resize((size_t)w * h * 3);
     const Img& src = *packed_src;
-    for (size_t i = 0; i < src.size(); i++)
-        for (int k = 0; k < 3; k++)
-            bytes[i * 3 + k] = (uint8_t)(clamp(src[i][k], 0.0f, 1.0f) * 255 + 0.5f);
+#pragma omp parallel for schedule(static)
+    for (long i = 0; i < (long)src.size(); i++) {
+        bytes[i * 3] = (uint8_t)(clamp(src[i][0], 0.0f, 1.0f) * 255 + 0.5f);
+        bytes[i * 3 + 1] = (uint8_t)(clamp(src[i][1], 0.0f, 1.0f) * 255 + 0.5f);
+        bytes[i * 3 + 2] = (uint8_t)(clamp(src[i][2], 0.0f, 1.0f) * 255 + 0.5f);
+    }
 }
 
 static float mat_outline_width(const json& spec) {

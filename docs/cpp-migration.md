@@ -610,3 +610,67 @@ harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不�
 相等，但配对中位测量 +1.8ms/f：tonemap 独立 pass 的自动向量化机会被
 标量混合循环破坏，省下的读写趟盖不回，已 revert（HANDOFF §3 待做 #4
 标定驳回；此结论同样封存了「pack 直灌」的变体，直到 SIMD/wgpu）。
+
+
+## 十六、SIMD 分发层（2026-10-31，Tier A 位精确双内核落地）
+
+「SIMD/wgpu 大项」的首步不是 wgpu（C++ 单头栈没有无障碍的 GPU 后端），
+而是 CPU 端向量内核——先立**分发接口与数值政策**，再逐热点接入。
+
+**工具链事实（tmp/probe_attr.cpp / probe_fma.cpp 实证）**：
+- `target_clones` 在 Windows/PE **不可用**（依赖 ELF ifunc）——运行时
+  分发只能手工做：成对 kernel（scalar / `__attribute__((target("avx2")))`
+  向量版）+ 一次性 `__builtin_cpu_supports("avx2")` 函数指针解析；
+- 本机 CPU：AVX2+FMA 有，AVX512 无；
+- GCC 15 的 AVX 命名与 Intel 不一致：`_mm256_cvttps_epi32`/
+  `_mm256_cvtepi32_ps`（不是 Intel 的 `_mm256_cvttps2dq`/`cvtdq2_ps`）；
+- 默认构建是 SSE2 基线，immintrin 的声明须放在 `#pragma GCC push_options
+  target("avx2")` 窗口内 include 再 pop（kernel 本体自带 target 属性）；
+- GCC 15 在 avx2 target 函数内**不**把 `a*b+c` 合约为 FMA（200 万随机
+  输入零差异、反汇编无 vfmadd），但内核仍显式钉
+  `optimize("fp-contract=off")`，防跨版本悄悄漂移。
+
+**数值政策两档**：
+- **Tier A 位精确**：lane 内与标量体同序（无重结合、无 FMA；div/sqrt
+  走硬件 IEEE 一致；LUT gather 读同一表项；`(int)` 截断用 cvttps_epi32
+  同语义，负值/带外 lane 索引钳进表内后 blend 丢弃）。验收 = 新旧
+  二进制静帧 PNG **逐字节相等**。例外域记明在案：int 溢出截断的
+  `(int)` 标量本就是 UB（极大 chromatic 的病态场景），向量侧给
+  cvttps INT_MIN→钳 0，纹丝不进正版面的值域不适用此门禁。
+- **Tier B 近似**：向量多项式超越函数（atan2f/sinf/expf），误差
+   
+  远低于 8-bit 显著性；验收 = region-cmp A/B ±0.05 门禁。先例：
+  ACES/阶梯 LUT 的 ~1e-4 已被上一批优化接受。
+
+**机制**（chamina.h「SIMD dispatch」节）：
+- 每个 kernel 一对 `*_rows_scalar` / `*_rows_avx2`（尾循环调用标量体，
+  保证非 8 倍数宽度也逐字节一致）；函数指针经魔 static 一次性解析，
+  `CHAMINA_NO_SIMD=1` 强制标量路径（配对测量开关）；
+- OpenMP 分块按 8-px lane 组切块（blocks = n/8，整组不跨界），块序
+  镜像 static 调度，保证 CPP_PROF 段耗时跨版本可比；
+- **AoS `array<float,3>` 布局不动**：读经 `_mm256_i32gather_ps`（索引
+  i*3+k），写经对齐 scratch + 逐像素交错落盘——dof/bloom 等 pass 共享
+  该内存格式，不为此重构；
+- 分发点：`tonemap_into`（ACES fit LUT gather + sRGB LUT gather 全幅
+  pass）与 `grade_into`（色差采样 gather ×3 + vsqrtps 晕影 + 亮度/饱和/
+  闪光）；pack 全幅循环顺手从串行改为 OpenMP 并行（逐像素同式，位精确）。
+
+**验收与测量**（新旧二进制 = 基线 `dist/chamina-cpp.exe@820d77a+SIMD 前）：
+- 字节门禁 **8/8 首跑全等**：bird t=8/12/20.35/50/100/325（fx-on，
+  grade+tonemap+pack 全走）+ fuzz gen 场景 t=12/100（与官
+  `js/region-cmp.mjs` 三帧比值同历史通过值——t=8 sky 1.005/horizon
+  1.014/text 1.030/full 1.020，t=20.35 已知采样伪影维持原状）；
+- 配对中位（同刻 30 帧窗，交替 5 轮，SIMD 开 vs `CHAMINA_NO_SIMD=1`）：
+  - fx-off（fuzz gen 场景 --from 50）：finish **86.8 → 61.0ms**；
+  - fx-on（bird --from 100）：finish **108.4 → 66.9ms**（对基线二进制
+    96.6 → 66.9 = **-29.7ms**）；
+  - render 段两场景均在噪声带内（±5ms）——skydome 本批未动；
+- amalgamation 39070 行再生成，宿主验证：example 单 TU（-Idist）编译
+  + 渲染与 CLI 路径逐字节相等；api-only 二 TU 干净。
+
+**wgpu 前瞻**：本批 kernel 都是「全幅连续缓冲上的帧函数段」，签名即
+未来 GPU 后端可按同签名接管的接口位；本会话不引入运行库依赖。
+
+**后续队列**（按收益排）：skydome 全幅循环的 Tier A 部分（normalize/
+sink sqrtf、梯度 LUT lerp 向量化）；星点 atan2f 与 fbm sinf 的 Tier B
+向量多项式（走 region 门禁）；可选 byte-pack 真打包内核。
