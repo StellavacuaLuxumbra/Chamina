@@ -183,11 +183,11 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
 
 | 阶段 | 优化前 | 现在 | 已做 |
 |---|---|---|---|
-| render | 138ms | **45.0ms**（本轮同刻配对中位） | skydome 半分辨率+LUT；格点 hash/星点胞/闪烁查表；**skydome 全幅 AVX2 内核（Tier A）** |
-| 　skydome | 132ms | **32.1ms**（配对 base 57.1 → new 32.1，`[prof] skydome` 中位） | base 11.9 / 星云 19.5 / 星点 19.8（桩阶梯分解）；**全幅循环 Tier A（LUT gather/双线性 gather/硬件 sqrt+div + atan2f lane 提取）** |
+| render | 138ms | **32.7ms**（本轮同刻配对中位） | skydome 半分辨率+LUT；格点 hash/星点胞/闪烁查表；**skydome 全幅 + 云场 prepass AVX2 内核（Tier A）** |
+| 　skydome | 132ms | **20.2ms**（配对 base 58.8 → new 20.2，`[prof] skydome` 中位） | base 11.9 / 星云 19.5 / 星点 19.8（桩阶梯分解）；**全幅循环 + fbm 场 lane 化（域内零 sinf）** |
 | finish | 168ms | **47.5ms**（fx-on bird，2026-10-31 同刻配对中位；同口径基线复测 69.3） | sRGB LUT、bloom 级联上采样、blur 缓冲复用+跳死代码水平 pass、ACES fit LUT、全链静态缓冲/原地化；**AVX2 tonemap/grade 内核 + pack 并行（位精确）** |
 | 帧分配 | — | 已省 | Frame 复用、color 跳清屏（已验证）、文字块窗口预剔除 |
-| 视频段 | 3.25 fps | **7.24 fps**（同窗交替配对 60 帧×3 轮，同刻基线 5.37） | ~~SIMD stage 1~~ + skydome Tier A |
+| 视频段 | 3.25 fps | **8.00 fps**（同窗交替配对 60 帧×3 轮，同刻基线 5.40） | ~~SIMD stage 1~~ + skydome Tier A + 云场 prepass lane 化 |
 
 **待做优化（按性价比排序）**：
 1. ~~bloom 5 级 blur 的每帧 tmp+out 分配~~（已完成：blur_into 静态缓冲 +
@@ -205,10 +205,13 @@ t=20.35 全区 0.970；t=325 全区 1.001。**任何比值漂移 >0.05 都是新
    Tier A 位精确内核，字节 8/8 全等；口径注记见 cpp-migration §十六）。
    ~~skydome 全幅 Tier A~~（**已完成**，2026-10-31 同日第二批：字节门禁
    8/8 全等；同刻配对 render 70.7→45.0ms、`[prof] skydome` 子段
-   57.1→32.1ms、视频段 5.37→**7.24 fps**，分块/钳位/fbm 留批记录见
-   cpp-migration §十六 skydome 批）。**剩余大头**：半分辨 nebula loop 的
-   fbm2（8×sinf）与星点 atan2f——两者都是 **Tier B 向量多项式**，走
-   region 门禁 ±0.05；可选 byte-pack 打包内核；wgpu 按帧函数段签名后接管。
+   57.1→32.1ms、视频段 5.37→7.24 fps）。~~云场 prepass lane 化~~
+   （**已完成**，同日第三批：fbm2 跨 lane 四角 gather + 域外 fallback
+   lane 提取混回；域内帧已零 sinf；ingress render 71.1→32.7ms、
+   skydome 子段 58.8→20.2ms、视频段 5.40→**8.00 fps**，字节 8/8 全等）
+   。**剩余**：主循环 uv 的 atan2f 向量多项式（Tier B，region 门禁
+   ±0.05，cloud/主循环同入口）；cell_tw 的 73k 标量 sinf 择机向量化；
+   可选 byte-pack 打包内核；wgpu 按帧函数段签名后接管。
    分发层/政策见 cpp-migration §十六。
 
 ## 4. 已修 bug 清单（防回归，改相关代码前先读）
@@ -334,8 +337,11 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    Tier A 位精确双内核（tonemap/grade）+ pack 并行，字节门禁 8/8 全等。
    ~~skydome 全幅 Tier A~~（**已完成**，2026-10-31 同日第二批：字节 8/8
    全等，render 70.7→45.0ms、skydome 57.1→32.1ms、视频段 5.37→7.24 fps）。
-   **后续子项**：半分辨 nebula loop 的 fbm（8×sinf）Tier B → 星点 atan2f
-   Tier B（均走 region 门禁 ±0.05）→ 可选 byte-pack 打包内核；wgpu 后端
+   ~~云场 prepass lane 化~~（**已完成**，同日第三批：fbm2 跨 lane、域内
+   零 sinf；render 71.1→32.7ms、skydome 58.8→20.2ms、视频段 5.40→8.00
+   fps，字节 8/8 全等）。
+   **后续子项**：主循环 uv 的 atan2f 向量多项式（Tier B，region 门禁
+   ±0.05）→ cell_tw sinf 择机向量化 → 可选 byte-pack 打包内核；wgpu 后端
    按同签名帧函数段前缀，暂不引入。
 6. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十六 与本文件。
    可选：更多 fuzz 种子长跑；editor（Web GUI）低优先级。

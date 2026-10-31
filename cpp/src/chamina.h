@@ -1267,6 +1267,57 @@ static void skydome_rows_scalar(float* col, float* dep, int w, int h, int y0, in
 // Defined after the grade stage (needs the AVX2 infrastructure further down).
 static skydome_kfn skydome_kernel();
 
+// ---------------------------------------------------------------------------
+// Half-res nebula prepass (the fbm2 field), split for SIMD the same way as the
+// full-res loop: scalar kernel verbatim from the old row loop, AVX2 half
+// lane-for-lane (atan2f by lane extraction, fbm2 across lanes — 2 octaves × 4
+// lattice-corner gathers with the exact-scalar fallback blended back on the
+// rare out-of-domain lane). Tier A: byte gate must stay EQUAL (the fbm table
+// hits return the same entries the scalar hash2_lattice reads).
+// ---------------------------------------------------------------------------
+using cloud_kfn = void (*)(float* cl, int hw, int hh, int y0, int y1, int w, int h,
+                           const float* fwd, const float* rgt, const float* up, float tan_h,
+                           float aspect, float t, const float* pal);
+
+// One half-res nebula cell, byte-for-byte the old row-loop body of the
+// prepass (drift term folded to d18/d09 exactly as the per-pixel expression
+// computes it). Shared by the scalar kernel and the AVX2 tail.
+static inline void cloud_px_scalar(float* cl, int hw, int w, int row, int x,
+                                   const float* fwd, const float* rgt, const float* up,
+                                   float tan_h, float aspect, float yn, float d18, float d09) {
+    float px = (x + 0.5f) * w / hw;
+    float xn = 2 * px / w - 1;
+    Vec3 ray = (Vec3{fwd[0], fwd[1], fwd[2]} +
+                Vec3{rgt[0], rgt[1], rgt[2]} * (xn * tan_h * aspect) +
+                Vec3{up[0], up[1], up[2]} * (yn * tan_h))
+                   .normalize();
+    float uv0 = atan2f(ray.z, ray.x) / (float)M_PI / 2 + 0.5f;
+    float uv1 = ray.y * 0.5f + 0.5f;
+    float qx = (uv0 * 7 + d18) * 2;
+    float qy = (uv1 * 3.5f + d09) * 2;
+    float n = fbm2(qx, qy);
+    float kk = clamp((n - 0.40f) / (0.92f - 0.40f), 0.0f, 1.0f);
+    cl[(size_t)row * hw + x] = kk * kk * (3 - 2 * kk);
+}
+
+static void cloud_rows_scalar(float* cl, int hw, int hh, int y0, int y1, int w, int h,
+                              const float* fwd, const float* rgt, const float* up, float tan_h,
+                              float aspect, float t, const float* pal) {
+    // drift folding: (t*pal[11]) once, then *0.018/*0.009 exactly as the
+    // per-pixel expression would compute them
+    float tk = t * pal[11];
+    const float d18 = tk * 0.018f, d09 = tk * 0.009f;
+    for (int row = y0; row < y1; row++) {
+        float py = (row + 0.5f) * h / hh;
+        float yn = 1 - 2 * py / h;
+        for (int x = 0; x < hw; x++)
+            cloud_px_scalar(cl, hw, w, row, x, fwd, rgt, up, tan_h, aspect, yn, d18, d09);
+    }
+}
+
+// Defined next to the other AVX2 kernels, below.
+static cloud_kfn cloud_kernel();
+
 static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12]) {
     const int w = f.w, h = f.h;
 
@@ -1278,25 +1329,20 @@ static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12])
     const bool need_cloud = pal[9] > 0.001f && !getenv("CPP_SKIP_CLOUD");
     if (need_cloud) {
         cloud.assign((size_t)hw * hh, 0.0f);
-#pragma omp parallel for schedule(static)
-        for (int row = 0; row < hh; row++) {
-            float py = (row + 0.5f) * h / hh;
-            float yn = 1 - 2 * py / h;
-            for (int x = 0; x < hw; x++) {
-                float px = (x + 0.5f) * w / hw;
-                float xn = 2 * px / w - 1;
-                Vec3 ray = (cam.fwd + cam.right * (xn * cam.tan_h * cam.aspect) +
-                            cam.up * (yn * cam.tan_h))
-                               .normalize();
-                float uv0 = atan2f(ray.z, ray.x) / (float)M_PI / 2 + 0.5f;
-                float uv1 = ray.y * 0.5f + 0.5f;
-                float qx = (uv0 * 7 + t * pal[11] * 0.018f) * 2;
-                float qy = (uv1 * 3.5f + t * pal[11] * 0.009f) * 2;
-                float n = fbm2(qx, qy);
-                float kk = clamp((n - 0.40f) / (0.92f - 0.40f), 0.0f, 1.0f);
-                cloud[(size_t)row * hw + x] = kk * kk * (3 - 2 * kk);
-            }
+        cloud_kfn cfn = cloud_kernel();
+#ifdef _OPENMP
+#pragma omp parallel
+        {
+            int T = omp_get_num_threads(), tk = omp_get_thread_num();
+            int y0 = (int)((long long)hh * tk / T), y1 = (int)((long long)hh * (tk + 1) / T);
+            if (y0 < y1)
+                cfn(cloud.data(), hw, hh, y0, y1, w, h, &cam.fwd.x, &cam.right.x, &cam.up.x,
+                    cam.tan_h, cam.aspect, t, pal);
         }
+#else
+        cfn(cloud.data(), hw, hh, 0, hh, w, h, &cam.fwd.x, &cam.right.x, &cam.up.x, cam.tan_h,
+            cam.aspect, t, pal);
+#endif
     }
 
     const bool need_stars = pal[10] > 0.001f && !getenv("CPP_SKIP_STARS");
@@ -2418,6 +2464,108 @@ static inline __m256 sky_lut_lanes256(__m256 v, const float* lutv, int n) {
     return _mm256_add_ps(l0, _mm256_mul_ps(_mm256_sub_ps(l1, l0), fr));
 }
 
+// Shared lane normalize for the sky geometry rays: l = sqrt(dot) with dot's
+// (x²+y²)+z² order kept, and the scalar's l>0 ternary as a blend (dead lanes
+// carry 0 exactly like the scalar). Used by both sky kernels; pure ops, so
+// bit-identical whichever kernel calls it.
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline void norm_ray_lanes256(__m256 dx, __m256 dy, __m256 dz, __m256* nx, __m256* ny,
+                                     __m256* nz) {
+    __m256 zero = _mm256_setzero_ps();
+    __m256 d2 = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy)),
+                              _mm256_mul_ps(dz, dz));
+    __m256 len = _mm256_sqrt_ps(d2);
+    __m256 m = _mm256_cmp_ps(len, zero, _CMP_GT_OQ);
+    *nx = _mm256_blendv_ps(zero, _mm256_div_ps(dx, len), m);
+    *ny = _mm256_blendv_ps(zero, _mm256_div_ps(dy, len), m);
+    *nz = _mm256_blendv_ps(zero, _mm256_div_ps(dz, len), m);
+}
+
+// atan2f per lane: 8 exact scalar calls (Tier A keeps the transcendental, the
+// Tier B vector polynomial swap is a later, region-gated slice).
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 atan2f_lanes256(__m256 z, __m256 x) {
+    alignas(32) float zb[8], xb[8], ab[8];
+    _mm256_store_ps(zb, z);
+    _mm256_store_ps(xb, x);
+    for (int k = 0; k < 8; k++) ab[k] = atan2f(zb[k], xb[k]);
+    return _mm256_load_ps(ab);
+}
+
+// hash2_lattice across lanes: in-domain integer lanes gather the same table
+// item the scalar reads (index identical, clamped only for gather safety);
+// out-of-domain / non-integer lanes fall back to exact scalar hash2 via lane
+// extraction, blended back. Same if/else as hash2_lattice, bit-identical.
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 hash2_lattice_lanes256(__m256 x, __m256 y, const float* tab) {
+    const __m256 zero = _mm256_setzero_ps();
+    const __m256 k1024 = _mm256_set1_ps(1024.0f), k512 = _mm256_set1_ps(512.0f);
+    __m256 fx = _mm256_floor_ps(x), fy = _mm256_floor_ps(y);
+    __m256 isint = _mm256_and_ps(_mm256_cmp_ps(x, fx, _CMP_EQ_OQ),
+                                 _mm256_cmp_ps(y, fy, _CMP_EQ_OQ));
+    __m256 inr = _mm256_and_ps(
+        _mm256_cmp_ps(x, zero, _CMP_GE_OQ),
+        _mm256_and_ps(_mm256_cmp_ps(x, k1024, _CMP_LT_OQ),
+                      _mm256_and_ps(_mm256_cmp_ps(y, zero, _CMP_GE_OQ),
+                                    _mm256_cmp_ps(y, k512, _CMP_LT_OQ))));
+    __m256 ok = _mm256_and_ps(isint, inr);
+    __m256i idx = _mm256_add_epi32(_mm256_mullo_epi32(_mm256_cvttps_epi32(fy),
+                                                      _mm256_set1_epi32(1024)),
+                                   _mm256_cvttps_epi32(fx));
+    __m256i idg = _mm256_min_epi32(_mm256_max_epi32(idx, _mm256_setzero_si256()),
+                                   _mm256_set1_epi32(1024 * 512 - 1));
+    __m256 tv = _mm256_i32gather_ps(tab, idg, 4);
+    __m256 res = tv;
+    if (_mm256_movemask_ps(ok) != 0xFF) {
+        // rare path: exact scalar fallback per lane, then blend
+        alignas(32) float xb[8], yb[8], hb[8];
+        _mm256_store_ps(xb, x);
+        _mm256_store_ps(yb, y);
+        for (int k = 0; k < 8; k++) hb[k] = hash2(xb[k], yb[k]);
+        res = _mm256_blendv_ps(_mm256_load_ps(hb), tv, ok);
+    }
+    return res;
+}
+
+// vnoise across lanes: same op order as the scalar (u via 2*fx exact, corners
+// computed with (ix, iy), (ix+1, iy), … as floats exactly like the scalar).
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 vnoise_lanes256(__m256 x, __m256 y, const float* tab) {
+    const __m256 one = _mm256_set1_ps(1.0f);
+    const __m256 three = _mm256_set1_ps(3.0f);
+    __m256 ix = _mm256_floor_ps(x), iy = _mm256_floor_ps(y);
+    __m256 fx = _mm256_sub_ps(x, ix), fy = _mm256_sub_ps(y, iy);
+    __m256 ux = _mm256_mul_ps(_mm256_mul_ps(fx, fx),
+                              _mm256_sub_ps(three, _mm256_add_ps(fx, fx)));
+    __m256 uy = _mm256_mul_ps(_mm256_mul_ps(fy, fy),
+                              _mm256_sub_ps(three, _mm256_add_ps(fy, fy)));
+    __m256 ixp = _mm256_add_ps(ix, one), iyp = _mm256_add_ps(iy, one);
+    __m256 h00 = hash2_lattice_lanes256(ix, iy, tab);
+    __m256 h10 = hash2_lattice_lanes256(ixp, iy, tab);
+    __m256 h01 = hash2_lattice_lanes256(ix, iyp, tab);
+    __m256 h11 = hash2_lattice_lanes256(ixp, iyp, tab);
+    __m256 a = _mm256_add_ps(_mm256_mul_ps(h00, _mm256_sub_ps(one, ux)),
+                             _mm256_mul_ps(h10, ux));
+    __m256 b = _mm256_add_ps(_mm256_mul_ps(h01, _mm256_sub_ps(one, ux)),
+                             _mm256_mul_ps(h11, ux));
+    return _mm256_add_ps(_mm256_mul_ps(a, _mm256_sub_ps(one, uy)),
+                         _mm256_mul_ps(b, uy));
+}
+
+// fbm2 across lanes: two octaves with the scalar's marching (x*2.03+1.7,
+// y*2.03+9.2, a halved once); 0.25f is the exact value a reaches after
+// a *= 0.5f.
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 fbm2_lanes256(__m256 x, __m256 y, const float* tab) {
+    const __m256 k050 = _mm256_set1_ps(0.5f), k025 = _mm256_set1_ps(0.25f);
+    const __m256 k203 = _mm256_set1_ps(2.03f), k17c = _mm256_set1_ps(1.7f),
+                 k92c = _mm256_set1_ps(9.2f);
+    __m256 acc = _mm256_mul_ps(k050, vnoise_lanes256(x, y, tab));
+    x = _mm256_add_ps(_mm256_mul_ps(x, k203), k17c);
+    y = _mm256_add_ps(_mm256_mul_ps(y, k203), k92c);
+    return _mm256_add_ps(acc, _mm256_mul_ps(k025, vnoise_lanes256(x, y, tab)));
+}
+
 __attribute__((target("avx2"), optimize("fp-contract=off")))
 static void skydome_rows_avx2(float* col, float* dep, int w, int h, int y0, int y1,
                               const float* fwd, const float* rgt, const float* up, float tan_h,
@@ -2497,15 +2645,8 @@ static void skydome_rows_avx2(float* col, float* dep, int w, int h, int y0, int 
             __m256 dx = _mm256_add_ps(_mm256_add_ps(kfx, _mm256_mul_ps(krx, rks)), upxb);
             __m256 dy = _mm256_add_ps(_mm256_add_ps(kfy, _mm256_mul_ps(kry, rks)), upyb);
             __m256 dz = _mm256_add_ps(_mm256_add_ps(kfz, _mm256_mul_ps(krz, rks)), upzb);
-            // normalize: l = sqrt(dot), dot = (x²+y²)+z² left-assoc as dot()
-            __m256 d2 = _mm256_add_ps(
-                _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy)),
-                _mm256_mul_ps(dz, dz));
-            __m256 len = _mm256_sqrt_ps(d2);
-            __m256 lmask = _mm256_cmp_ps(len, zero, _CMP_GT_OQ);
-            __m256 nx = _mm256_blendv_ps(zero, _mm256_div_ps(dx, len), lmask);
-            __m256 ny = _mm256_blendv_ps(zero, _mm256_div_ps(dy, len), lmask);
-            __m256 nz = _mm256_blendv_ps(zero, _mm256_div_ps(dz, len), lmask);
+            __m256 nx, ny, nz;
+            norm_ray_lanes256(dx, dy, dz, &nx, &ny, &nz);
             // gradient: pow085 LUT (the helper's clamp duplicates the h01 clamp
             // idempotently, same as clamping twice in the scalar body)
             __m256 mixv = sky_lut_lanes256(
@@ -2543,14 +2684,10 @@ static void skydome_rows_avx2(float* col, float* dep, int w, int h, int y0, int 
                 c2v = _mm256_add_ps(c2v, _mm256_mul_ps(_mm256_set1_ps(pal[8]), wv));
             }
             if (need_stars) {
-                // atan2f lane extraction: 8 scalar calls, bit-identical to the
-                // per-pixel scalar body
-                alignas(32) float zb[8], xb[8], ab[8];
-                _mm256_store_ps(zb, nz);
-                _mm256_store_ps(xb, nx);
-                for (int k = 0; k < 8; k++) ab[k] = atan2f(zb[k], xb[k]);
+                // atan2f lane extraction (stored in the shared helper): 8
+                // scalar calls, bit-identical to the per-pixel scalar body
                 __m256 uv0 = _mm256_add_ps(
-                    _mm256_div_ps(_mm256_div_ps(_mm256_load_ps(ab), kpi), ktwo), half);
+                    _mm256_div_ps(_mm256_div_ps(atan2f_lanes256(nz, nx), kpi), ktwo), half);
                 __m256 uv1 = _mm256_add_ps(_mm256_mul_ps(ny, half), half);
                 __m256 sp0 = _mm256_mul_ps(uv0, k380);
                 __m256 sp1 = _mm256_mul_ps(uv1, k190);
@@ -2633,6 +2770,95 @@ static skydome_kfn skydome_kernel() {
         simd_avx2() ? &skydome_rows_avx2 :
 #endif
         &skydome_rows_scalar;
+    return fn;
+}
+
+// Half-res nebula prepass, AVX2 half. Per lane: ray (same hoists/shared
+// normalize helper), lane-extracted atan2f, then fbm2 in lanes — 2 octaves ×
+// 4 corner gathers with the exact scalar hash2 fallback blended on
+// out-of-domain lanes (bird/fuzz scenes never leave the table domain; the
+// fallback exists so out-of-range scenes can't silently change values).
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static void cloud_rows_avx2(float* cl, int hw, int hh, int y0, int y1, int w, int h,
+                            const float* fwd, const float* rgt, const float* up, float tan_h,
+                            float aspect, float t, const float* pal) {
+    const float* tab = lattice_hash_tab();
+    const __m256 half = _mm256_set1_ps(0.5f);
+    const __m256 one = _mm256_set1_ps(1.0f);
+    const __m256 zero = _mm256_setzero_ps();
+    const __m256i klanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    const __m256 kfx = _mm256_set1_ps(fwd[0]);
+    const __m256 kfy = _mm256_set1_ps(fwd[1]);
+    const __m256 kfz = _mm256_set1_ps(fwd[2]);
+    const __m256 krx = _mm256_set1_ps(rgt[0]);
+    const __m256 kry = _mm256_set1_ps(rgt[1]);
+    const __m256 krz = _mm256_set1_ps(rgt[2]);
+    const __m256 kux = _mm256_set1_ps(up[0]);
+    const __m256 kuy = _mm256_set1_ps(up[1]);
+    const __m256 kuz = _mm256_set1_ps(up[2]);
+    const __m256 kt = _mm256_set1_ps(tan_h);
+    const __m256 ka = _mm256_set1_ps(aspect);
+    const __m256 kw = _mm256_set1_ps((float)w);
+    const __m256 kchw = _mm256_set1_ps((float)hw);
+    const __m256 kpi = _mm256_set1_ps((float)M_PI);
+    const __m256 ktwo = _mm256_set1_ps(2.0f);
+    const __m256 k7 = _mm256_set1_ps(7.0f);
+    const __m256 k35 = _mm256_set1_ps(3.5f);
+    const __m256 k040 = _mm256_set1_ps(0.40f);
+    // the scalar divides by the compiler-folded (0.92f - 0.40f); same fold here
+    const __m256 k052 = _mm256_set1_ps(0.92f - 0.40f);
+    // drift: (t*pal[11]) once, then each multiplier separately — bitwise the
+    // per-pixel scalar sub-products westill fold
+    const float tk = t * pal[11];
+    const __m256 kd18 = _mm256_set1_ps(tk * 0.018f);
+    const __m256 kd09 = _mm256_set1_ps(tk * 0.009f);
+    for (int row = y0; row < y1; row++) {
+        float py = (row + 0.5f) * h / hh;
+        float yn = 1 - 2 * py / h;
+        const __m256 kb0 = _mm256_set1_ps(yn * tan_h);
+        const __m256 upxb = _mm256_mul_ps(kux, kb0);
+        const __m256 upyb = _mm256_mul_ps(kuy, kb0);
+        const __m256 upzb = _mm256_mul_ps(kuz, kb0);
+        int x = 0;
+        for (; x + 8 <= hw; x += 8) {
+            __m256i kb = _mm256_add_epi32(klanes, _mm256_set1_epi32(x));
+            __m256 xf = _mm256_cvtepi32_ps(kb);
+            // px = (x+0.5)*w/hw; xn = 2*px/w - 1 (2*px exact via + self)
+            __m256 px = _mm256_div_ps(_mm256_mul_ps(_mm256_add_ps(xf, half), kw), kchw);
+            __m256 xn = _mm256_sub_ps(_mm256_div_ps(_mm256_add_ps(px, px), kw), one);
+            __m256 rks = _mm256_mul_ps(_mm256_mul_ps(xn, kt), ka);
+            __m256 dx = _mm256_add_ps(_mm256_add_ps(kfx, _mm256_mul_ps(krx, rks)), upxb);
+            __m256 dy = _mm256_add_ps(_mm256_add_ps(kfy, _mm256_mul_ps(kry, rks)), upyb);
+            __m256 dz = _mm256_add_ps(_mm256_add_ps(kfz, _mm256_mul_ps(krz, rks)), upzb);
+            __m256 nx, ny, nz;
+            norm_ray_lanes256(dx, dy, dz, &nx, &ny, &nz);
+            __m256 uv0 = _mm256_add_ps(
+                _mm256_div_ps(_mm256_div_ps(atan2f_lanes256(nz, nx), kpi), ktwo), half);
+            __m256 uv1 = _mm256_add_ps(_mm256_mul_ps(ny, half), half);
+            // qx = (uv0*7 + t*pal[11]*0.018)*2, qy likewise with 3.5/0.009
+            __m256 qx = _mm256_mul_ps(_mm256_add_ps(_mm256_mul_ps(uv0, k7), kd18), ktwo);
+            __m256 qy = _mm256_mul_ps(_mm256_add_ps(_mm256_mul_ps(uv1, k35), kd09), ktwo);
+            __m256 n = fbm2_lanes256(qx, qy, tab);
+            __m256 kk = _mm256_min_ps(
+                _mm256_max_ps(_mm256_div_ps(_mm256_sub_ps(n, k040), k052), zero), one);
+            __m256 stv = _mm256_mul_ps(
+                _mm256_mul_ps(kk, kk),
+                _mm256_sub_ps(_mm256_set1_ps(3.0f), _mm256_add_ps(kk, kk)));
+            _mm256_storeu_ps(cl + (size_t)row * hw + x, stv);
+        }
+        (void)upxb; (void)upyb; (void)upzb;  // silences unused-warn in odd shapes
+        for (int xi = x; xi < hw; xi++)
+            cloud_px_scalar(cl, hw, w, row, xi, fwd, rgt, up, tan_h, aspect, yn,
+                            tk * 0.018f, tk * 0.009f);
+    }
+}
+
+static cloud_kfn cloud_kernel() {
+    static cloud_kfn fn =
+#if CHAMINA_SIMD_AVX2
+        simd_avx2() ? &cloud_rows_avx2 :
+#endif
+        &cloud_rows_scalar;
     return fn;
 }
 

@@ -708,10 +708,40 @@ harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不�
 - 视频段（同刻交替 3 轮 60 帧，bench_vid 口径）：base 33.5 s
   （**5.37 fps**）→ new 24.9 s（**7.24 fps**，+35%）。
 
+**云场 prepass 批（2026-10-31 同日第三批，fbm2 场 lane 化，仍 Tier A）**：
+- 范围：draw_skydome 的半分辨 nebula prepass 整循环。原 row 循环逐字抽成
+  `cloud_px_scalar`；成对 `cloud_rows_scalar` / `cloud_rows_avx2` +
+  `cloud_kernel()` 分发，driver 同 skydome 成对模式；
+- lane 内容：ray 几何与全幅循环同构（共用新抽的 `norm_ray_lanes256`
+  normalize helper 与 `atan2f_lanes256` lane 提取 helper；这两 helper
+  同步重构掉 skydome 主循环里的对应重复段，重构后字节门禁复跑仍 8/8
+  全等——行为无差）；
+- **fbm2 跨 lane**（实读：fbm2 是 2 octaves × 4 corner 的格点噪声，
+  注释里的「8 sinf/像素」是旧多 octave 时代的口径，本机身早已
+  hash2 走格点表）：`vnoise_lanes256` 保序转录（u 平滑、四 corner
+  参考 (ix,iy)/(ix+1,iy)… 的 float 语义、(1-u) 加权序）、
+  `fbm2_lanes256` 保持 a/x 步进（0.25f = a*=0.5 的精确落点）；
+  corner 走 `hash2_lattice_lanes256`：域内整数 lane gather 同表项，
+  域外/非整数 lane 经 **movemask 捷径 + lane 提取标量 hash2** 原样
+  混回（标量 if/else 的位精确翻版；bird/fuzz 场景从未出域，
+  fallback 是域界保险而非路径）；
+- drift 折叠：`(t*pal[11])` 一次，`*0.018f`/`*0.009f` 各一次（与像素
+  体每像素同式同值），`(0.92f-0.40f)` 保留字面由编译器同法折叠；
+- 验收：字节门禁 8/8 全等；region 三帧与历史值逐项一致；amalgamation
+  **39611 行**再生；host smoke（example+api-only 双 TU）渲染 PNG 与
+  CLI 门禁 PNG 逐字节相等。
+- 配对（同刻 5 轮中位）：render **71.1 → 32.7ms**（同刻 base）；
+  `[prof] skydome` 子段 **58.8 → 20.2ms**（new-scalar 62.1 与 base 同带
+  ——标量侧无回归）；视频段 **5.40 → 8.00 fps**（60 帧×3 轮）。
+
 **wgpu 前瞻**：本批 kernel 都是「全幅连续缓冲上的帧函数段」，签名即
 未来 GPU 后端可按同签名接管的接口位；本会话不引入运行库依赖。
 
 **后续队列**（按收益排）：~~skydome 全幅循环的 Tier A~~（**已完成**，
-见上）；半分辨 nebula loop 的 **Tier B**（fbm2 的 8×sinf + atan2f 向量
-多项式，走 region 门禁 ±0.05）；星点 atan2f 的 Tier B 向量多项式；可选
-byte-pack 打包内核。
+见上）；~~半分辨 nebula prepass 的 Tier A lane 化~~（**已完成**，
+跨 lane 的 fbm2 四角 gather + 域外 fallback lane 提取混回，见上）——
+域内帧已零 sinf，「8×sinf」旧口径不再存在。剩余：主循环 uv 的
+**atan2f 向量多项式**（Tier B，region 门禁 ±0.05；cloud+主循环共用
+同一多项式入口）；`cell_tw` prepass 的 73k 标量 sinf 可走同族向量化
+（若归 Tier B 需逐项判定，tw 是 per-cell 独立低频值）；可选 byte-pack
+打包内核。
