@@ -2,11 +2,11 @@
 // library, no CLI involved. One TU owns the implementation:
 //
 //   g++ -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ \
-//       -Icpp/vendor -Icpp/src cpp/example/main.cpp \
+//       -I. -Ivendor example/main.cpp \
 //       -o dist/chamina-example.exe -lshell32
 //
-//   dist\chamina-example.exe                       → example.png (t=20.35)
-//   dist\chamina-example.exe scenes/bird.json target/chamina/audio_env.json example.png 20.35
+//   dist\chamina-example.exe                                 → example.png (t=20.35)
+//   dist\chamina-example.exe examples/bird.json out/audio_env.json example.png 20.35
 #define CHAMINA_IMPLEMENTATION
 #include "chamina.h"
 
@@ -18,8 +18,8 @@
 using namespace std;
 
 int main(int argc, char** argv) {
-    const char* scene_path = argc > 1 ? argv[1] : "scenes/bird.json";
-    const char* env_path   = argc > 2 ? argv[2] : "target/chamina/audio_env.json";
+    const char* scene_path = argc > 1 ? argv[1] : "examples/bird.json";
+    const char* env_path   = argc > 2 ? argv[2] : "";
     const char* out_path   = argc > 3 ? argv[3] : "example.png";
     float t = argc > 4 ? (float)atof(argv[4]) : 20.35f;
 

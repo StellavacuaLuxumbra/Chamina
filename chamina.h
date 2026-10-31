@@ -14,7 +14,7 @@
 // the header also builds single-threaded); on Windows add -lshell32
 // (CommandLineToArgvW). The vendored single-header dependencies
 // (nlohmann/json.hpp, stb_truetype.h, mapbox/earcut.hpp, stb_image_write.h)
-// are found through the include path (cpp/vendor in this repo).
+// are found through the include path (vendor in this repo).
 //
 // Minimal embedder:
 //
@@ -3120,7 +3120,7 @@ static double clamp_num(double v, double fb, double lo, double hi) {
 // OPT_NULL so Number.isFinite / clamp(Number(v)) behave exactly like node.
 struct GenArgs {
     string input, out;
-    string templ = "scenes/gift.json";  // node resolves ROOT/scenes/gift.json
+    string templ = "examples/gift.json";  // cwd-relative stage template
     OptNum size = optn(1.4), y = optn(-0.4), depth = optn(0.09);
     string color = "#ffffff";
     OptNum strength = optn(1.6);
@@ -5434,9 +5434,9 @@ static vector<double> load_energy(const string& path, const vector<LrcLine>& lin
 static void gen_usage() {
     fputs(
         "chamina-cpp gen <song.lrc> [options]\n"
-        "  LRC → scene JSON, single layout (port of node js/lrc2scene.mjs)\n"
+        "  LRC → scene JSON, single layout\n"
         "  -o, --out <file>       output scene JSON (default <lrc>.json)\n"
-        "  -t, --template <file>  stage to reuse (default scenes/gift.json, cwd-relative)\n"
+        "  -t, --template <file>  stage to reuse (default examples/gift.json, cwd-relative)\n"
         "  text:   --size --y --depth --color --strength --outline --outline-width\n"
         "  motion: --entrance --jitter --jitter-rot --jitter-freq --jitter-hit\n"
         "          --jitter-hit-dur --wave --wave-freq --wave-spacing --wave-hit\n"
@@ -5921,29 +5921,27 @@ static int gen_main(int argc, char** argv) {
 
 static string find_ffmpeg() {
     // cmd.exe (which popen shells out to) rejects forward slashes in the
-    // command position and mangles non-ASCII absolute paths, so candidates
-    // are normalised to backslashes — and the bundled installer copy wins.
+    // command position and mangles non-ASCII absolute paths, so the override
+    // is normalised to backslashes. Otherwise rely on PATH.
     auto norm = [](string p) {
         for (auto& c : p)
             if (c == '/') c = '\\';
         return p;
     };
-    if (const char* p = getenv("CHAMINA_FFMPEG")) return norm(p);
-    // The bundled installer copy wins; look for it relative to the exe too so
-    // dist\chamina-cpp.exe keeps working from any cwd (node resolves the same
-    // package through module resolution, independent of cwd).
-    for (auto rel : {"js/node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe"}) {
-        if (filesystem::exists(rel)) return norm(rel);
 #ifdef _WIN32
-        wchar_t exedir[MAX_PATH + 1] = {};
-        GetModuleFileNameW(nullptr, exedir, MAX_PATH);
-        error_code ec;
-        filesystem::path cand =
-            filesystem::path(exedir).parent_path() / ".." / filesystem::u8path(rel);
-        if (filesystem::exists(cand, ec))
-            return norm(cand.lexically_normal().u8string());
-#endif
+    // getenv() hands back an ANSI string, but callers treat paths as UTF-8
+    // (and CreateProcessW needs Unicode); read the wide environment directly.
+    wchar_t buf[32767];
+    DWORD n = GetEnvironmentVariableW(L"CHAMINA_FFMPEG", buf, 32767);
+    if (n > 0 && n < 32767) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, buf, (int)n, nullptr, 0, nullptr, nullptr);
+        string s((size_t)len, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, buf, (int)n, &s[0], len, nullptr, nullptr);
+        return norm(s);
     }
+#else
+    if (const char* p = getenv("CHAMINA_FFMPEG")) return norm(p);
+#endif
     return "ffmpeg";
 }
 

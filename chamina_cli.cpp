@@ -5,7 +5,7 @@
 // the public API. Build:
 //
 //   g++ -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ \
-//       -Icpp/vendor cpp/src/chamina_cli.cpp -o dist/chamina-cpp.exe -lshell32
+//       -Ivendor chamina_cli.cpp -o dist/chamina-cpp.exe -lshell32
 //
 // CLI (unchanged from the single-TU engine):
 //   chamina-cpp <scene.json> [--audio-env f] -o out.mp4 [--from n] [--frames n]
