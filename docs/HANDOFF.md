@@ -222,9 +222,11 @@ t=325 全区 0.989。**任何比值漂移 >0.05 都是新 bug。**
    max|err| 2.384e-7 rad；render 32.7→28.7ms、skydome 20.2→15.9ms、
    视频段 8.00→**8.29 fps**；双枝门禁 = NO_SIMD 字节 8/8 全等 +
    AVX 字节 DIFF 预期 + region 三帧 test 亮度与历史逐位一致，见
-   cpp-migration §十六 atan2 批）。**剩余**：cell_tw 的 73k 标量 sinf
-   择机向量化；可选 byte-pack 打包内核；wgpu 按帧函数段签名后接管。
-   分发层/政策见 cpp-migration §十六。
+   cpp-migration §十六 atan2 批）。**裁定收尾**（同日，两驳回见
+   cpp-migration §十六）：cell_tw 向量化（<0.3ms 且需大参约简，驳回）、
+   byte-pack 内核（净省 <0.4ms 而 AoS 转置 bug 面大，驳回）——
+   SIMD 大项 CPU 侧切片**全部完成**；wgpu 按帧函数段签名后接管（暂不
+   引入）。分发层/政策见 cpp-migration §十六。
 
 ## 4. 已修 bug 清单（防回归，改相关代码前先读）
 
@@ -355,8 +357,9 @@ target/chamina/        audio_env.json、native_*.png 金标准、场景备份
    ~~atan2f 向量多项式~~（**已完成**，同日第四批，首例 Tier B：
    `atan2f_vec256`，探针 2.384e-7 rad；render 32.7→28.7ms、skydome
    20.2→15.9ms、视频段 8.00→8.29 fps；双枝门禁 OK）。
-   **后续子项**：cell_tw sinf 择机向量化 → 可选 byte-pack 打包内核；
-   wgpu 后端按同签名帧函数段前缀，暂不引入。
+   **裁定收尾**：cell_tw sinf 与 byte-pack 内核均驳回（收益/风险比不足，
+   依据见 cpp-migration §十六）；SIMD CPU 侧切片全部完成。wgpu 后端按
+   同签名帧函数段前缀约定暂不引入。
 6. 每完成一个大项，更新 `docs/cpp-migration.md` §八~§十六 与本文件。
    可选：更多 fuzz 种子长跑；editor（Web GUI）低优先级。
 

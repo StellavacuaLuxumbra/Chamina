@@ -774,7 +774,23 @@ harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不�
 跨 lane 的 fbm2 四角 gather + 域外 fallback lane 提取混回，见上）；
 ~~主循环 uv 的 atan2f 向量多项式~~（**已完成**，首例 Tier B，
 `atan2f_vec256` 双重减半 + 9 项 Horner，双枝门禁见上）——
-域内帧已零
-sinf，「8×sinf」旧口径不再存在。剩余：`cell_tw` prepass 的 73k 标量
-sinf 同族向量化（若归 Tier B 需逐项判定，tw 是 per-cell 独立低频值）；
-可选 byte-pack 打包内核。
+域内帧已零 sinf，「8×sinf」旧口径不再存在。
+
+**裁定（2026-10-31 队列收尾，两驳回）**：
+- **cell_tw prepass 向量化：驳回**。73k sinf 在 OpenMP 全核并行下
+  占用 <0.3ms；相位域是 `t*1.7+r*40` 的大参域（t=325 时 ~592 rad），
+  Tier B 化需要大参 sin 约简立项，而不动 lane 提取版又无收益空间。
+  tw 直接线性乘进星点亮度，近似误差不经过格点化缓冲（与 atan2 不同），
+  像素级可见的危险面更大。保持 `#pragma omp parallel for` 标量现状。
+- **byte-pack 打包内核：驳回**。现状 finish 尾段（AoS float→u8）
+  是 `#pragma omp parallel for` 标量，占用 0.3–0.5ms；AVX2 上限
+  ~0.15–0.2ms，净省 <0.4ms。而 AoS 载入需要 cross-lane 转置
+  （gather 吃掉轻量 kernel 的多数 ops 区间；packssdw/packuswb 链
+  AVX 跨 lane 语义绕、stamp bug 面大）；并入 grade 内核尾部可省整段
+  遍历，但 finish 融合试验已有融合回归先例（§十五负结果）。
+  收益/风险比不足，保持标量并行现状。
+- 至此 **SIMD 大项 CPU 侧切片全部完成/裁定完毕**（stage1 tonemap/
+  grade/pack 并行 + skydome 全幅 + 云场 prepass + atan2f Tier B）。
+  队列下一大项是 wgpu 按帧函数段签名后接管（约定暂不引入）；其余
+  热点（finish 内 bloom/dof 已优化段、文字/环/粒子绘制）不在 SIMD
+  口径内，另行立项评估。
