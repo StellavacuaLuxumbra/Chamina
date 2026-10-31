@@ -586,6 +586,25 @@ case_26 崩溃嫌疑）、`out[i]` 越界写、`std::max_element` **静默跳过
 (c) `std::max_element` 之类 STL 折叠对 NaN 的行为与 JS 相反。病毒级
 语料（一本正经的可解析 LRC）+ 换种子复跑，是逼出语义差的唯一手段。
 
+**同日第二面（stamp 宽域 + astral/emoji 语料）**：语料加
+`🎵`/`鸟🎵`/`𝕏`/`a\u0301b`/零宽等 astral 与组合字符，时间戳生成从
+固定 `[mm:ss.xx]` 扩为 node TIME_RE 接受的全部形态——1 位分钟
+（unpadded）、1 位秒、冒号作小数分隔符、全 3 位小数保持。C++
+`match_clock` 与 node 正则逐字对齐（`\d{1,3}`/`\d{1,2}`/`[.:]\d{1,3}`）
+在 4 个种子 128 例全部通过——**行内戳/行戳的宽域格式双方吃掉**。
+
+**6/32 失败的根因全部是同一已知偏差被触达**：宽域首轮还带整秒 floor
+与 1 位小数 round 变体，同秒内两行会**同值不同文本**（`[00:05]` 与
+`[00:5]` 都是 5.0）——node 的行排序 tie-break 是
+`a.text.localeCompare(b.text)`（ICU collation：即零宽与 emoji 作低
+权重/可忽略），C++ fallback 是 codepoint 字节序（`🎵`=U+1F3B5 在
+`梦`=U+68A6 之后，故 C++ 排 row11 前；ICU 把 🎵 排前）。这是
+chamina.h 头注释「Known deviations」中声明的那条，被广谱语料
+触达——复刻 ICU 的版本依赖语义不现实，保持 codepoint fallback，
+harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不改值），
+同值 tie 不再自造；wide+emoji 轮 4 种子复跑全绿。累计五种子 176 +
+宽域/emoji 四种子 128 = **304/304**。
+
 **同日负结果（finish 融合试验）**：试图合并 grade/dof 的后处理趟数
 （dof mix 内联 tonemap、无-fx 直灌 pack）——像素级四路 A/B 逐字节
 相等，但配对中位测量 +1.8ms/f：tonemap 独立 pass 的自动向量化机会被
