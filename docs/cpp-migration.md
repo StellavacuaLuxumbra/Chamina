@@ -734,14 +734,47 @@ harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不�
   `[prof] skydome` 子段 **58.8 → 20.2ms**（new-scalar 62.1 与 base 同带
   ——标量侧无回归）；视频段 **5.40 → 8.00 fps**（60 帧×3 轮）。
 
+**atan2f 向量多项式批（2026-10-31 同日第四批，首个 Tier B）**：
+- 范围：`atan2f_lanes256` 的 lane 提取版整体换为 `atan2f_vec256`——
+  零分支八分域折叠（|y|>|x| ↔ θ←π/2−θ）、x<0 ← π−θ、y 符号位 OR 做
+  copysign、(0,0) lane blend 兜底 ±0；核内数学 = 双重减半
+  atan r = 2·atan(r/(1+√(1+r²)))（c ≤ 0.4143）+ 9 项奇幂级数（Horner，
+  c² 步进）；标量 kernel（cloud_px_scalar / skydome_px_scalar）与
+  CHAMINA_NO_SIMD 参考线**保持逐字不动**；
+- 系数来源（web 搜索工具两连取消 → 本地数值探针实证，项目 probe 传统）：
+  `tmp/atan2_probe.cpp` 与内核同序同字面（Horner + float 系数），4e6
+  随机样本 **max |err| = 2.384e-7 rad**（< 1e-6 验收线，exit 0），全部轴/
+  折叠边界 err ≤ 6e-8 rad；映入 uv0·380/(2π) 为 ≤ 1.4e-5 px——星胞
+  索引在胞界附近才可能 ±1 翻转，region 均值下不可见；
+- **双枝门禁（Tier B 语义首例）**：(a) `tmp/gate_sim_nosimd.mjs`（新）：
+  dist 强制 CHAMINA_NO_SIMD=1 vs tmp/chamina-base.exe → **8/8 ALL
+  EQUAL**（标量参考线完好；(0,0)→±0 blend 未开枝、翻转未触发）；
+  (b) AVX-on `gate_sim.mjs`：6 bird 帧 **DIFF（预期）**、gen 2 帧
+  EQUAL（gen 场景不触 atan2 路径——DIFF 来源隔离佐证）——Tier B
+  从此 AVX 字节流不再作门禁，region ±0.05 是主验收；
+- region 官门禁：三帧 test 亮度与 Tier A 批逐位一致（t=8
+  sky 13.5/horizon 45.4/text 166.5/full 35.6；t=325 59.2/77.1/187.2/
+  70.6；t=20.35 维持已知采样伪影 sky 1.348/text 0.908）——多项式对
+  区域统计零扰动；已知伪影帧 exit 2 与历史批同判；
+- 已知域界注记（接受）：标量 atan2f(±0,−0)=±π 的库里弧角在本
+  多项式里不可达（mx==0 先被 (0,0) blend 摘多，落 ±0）——渲染
+  射线拿不到 nx 与 nz 同时精确 ±0 的形态，域外病理 lane 才触达；
+- amalgamation **39653 行**再生；host smoke（example+api-only 双 TU）
+  渲染 PNG 与 CLI 门禁（同 AVX-on 字节流）逐字节相等；
+- 配对（同刻 5 轮中位 + prof 子段）：render **32.7 → 28.7ms**；
+  `[prof] skydome` 子段 **20.2 → 15.9ms**（base 58.1 同带复测；
+  new-scalar 61.4 无标量回归）；视频段 **8.00 → 8.29 fps**
+  （base 5.42 同刻）。
+
 **wgpu 前瞻**：本批 kernel 都是「全幅连续缓冲上的帧函数段」，签名即
 未来 GPU 后端可按同签名接管的接口位；本会话不引入运行库依赖。
 
 **后续队列**（按收益排）：~~skydome 全幅循环的 Tier A~~（**已完成**，
 见上）；~~半分辨 nebula prepass 的 Tier A lane 化~~（**已完成**，
-跨 lane 的 fbm2 四角 gather + 域外 fallback lane 提取混回，见上）——
-域内帧已零 sinf，「8×sinf」旧口径不再存在。剩余：主循环 uv 的
-**atan2f 向量多项式**（Tier B，region 门禁 ±0.05；cloud+主循环共用
-同一多项式入口）；`cell_tw` prepass 的 73k 标量 sinf 可走同族向量化
-（若归 Tier B 需逐项判定，tw 是 per-cell 独立低频值）；可选 byte-pack
-打包内核。
+跨 lane 的 fbm2 四角 gather + 域外 fallback lane 提取混回，见上）；
+~~主循环 uv 的 atan2f 向量多项式~~（**已完成**，首例 Tier B，
+`atan2f_vec256` 双重减半 + 9 项 Horner，双枝门禁见上）——
+域内帧已零
+sinf，「8×sinf」旧口径不再存在。剩余：`cell_tw` prepass 的 73k 标量
+sinf 同族向量化（若归 Tier B 需逐项判定，tw 是 per-cell 独立低频值）；
+可选 byte-pack 打包内核。

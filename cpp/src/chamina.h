@@ -2438,8 +2438,9 @@ static void grade_into(const Img& src, int w, int h, float chromatic, float vign
 // ---------------------------------------------------------------------------
 // skydome AVX2 kernel (placed after the grade stage: needs the dispatch
 // infrastructure above). Lane-for-lane transcription of skydome_px_scalar:
-// per-lane op order unchanged, atan2f by lane extraction (8 scalar calls per
-// 8 pixels — bit-identical), sqrt / divide / floor on the vector unit, LUT /
+// per-lane op order unchanged, atan2f as the atan2f_vec256 polynomial
+// (Tier B — region-gated; the scalar kernel keeps the exact libm call),
+// sqrt / divide / floor on the vector unit, LUT /
 // bilinear / star-cell gathers hit the same entries at the same clamped
 // indices. Star-cell indices are clamped to the table only for gather safety:
 // in-band lanes need no clamp, and the only lanes that would, are precisely
@@ -2481,15 +2482,55 @@ static inline void norm_ray_lanes256(__m256 dx, __m256 dy, __m256 dz, __m256* nx
     *nz = _mm256_blendv_ps(zero, _mm256_div_ps(dz, len), m);
 }
 
-// atan2f per lane: 8 exact scalar calls (Tier A keeps the transcendental, the
-// Tier B vector polynomial swap is a later, region-gated slice).
+// Tier B atan2f: vector polynomial. The scalar kernels keep the exact libm
+// call (the CHAMINA_NO_SIMD byte gate proves that reference line unchanged);
+// the AVX byte stream DIFFs by design from here on and the region gate ±0.05
+// becomes the contract for this helper. Shape: octant swap mask (|y|>|x| takes
+// θ ← π/2−θ), x<0 fold (θ ← π−θ), y's sign bitOR as copysign, then double
+// halving atan r = 2·atan(r/(1+√(1+r²))) into c ≤ 0.4143 and a 9-term odd
+// series evaluated by Horner in c². tmp/atan2_probe.cpp (same order/literals)
+// measured max |err| = 2.384e-7 rad over 4e6 samples + all axis folds
+// (acceptance < 1e-6); through uv·380/(2π) that is ≤ 1.4e-5 px inside the
+// star-cell lookup — a one-cell flip can occur at a cell boundary and stays
+// below region significance. The (0,0)-lane blend covers the scalar's ±0 case;
+// the (−0,−0)→±π libm corner cannot occur in rendered rays (a normalized
+// 3-vector never has both x and z exactly ±0 off the degenerate blend) and is
+// accepted as a Tier B domain note.
 __attribute__((target("avx2"), optimize("fp-contract=off")))
-static inline __m256 atan2f_lanes256(__m256 z, __m256 x) {
-    alignas(32) float zb[8], xb[8], ab[8];
-    _mm256_store_ps(zb, z);
-    _mm256_store_ps(xb, x);
-    for (int k = 0; k < 8; k++) ab[k] = atan2f(zb[k], xb[k]);
-    return _mm256_load_ps(ab);
+static inline __m256 atan2f_vec256(__m256 z, __m256 x) {
+    const __m256 zero = _mm256_setzero_ps();
+    const __m256 one = _mm256_set1_ps(1.0f);
+    const __m256 sign = _mm256_set1_ps(-0.0f);
+    __m256 ax = _mm256_andnot_ps(sign, x);
+    __m256 ay = _mm256_andnot_ps(sign, z);
+    __m256 mx = _mm256_max_ps(ax, ay);
+    __m256 mn = _mm256_min_ps(ax, ay);
+    // [0,1]; NaN only on an all-zero lane, which the final (0,0) blend resets
+    __m256 r0 = _mm256_div_ps(mn, mx);
+    __m256 c = _mm256_div_ps(
+        r0, _mm256_add_ps(one, _mm256_sqrt_ps(_mm256_add_ps(_mm256_mul_ps(r0, r0), one))));
+    __m256 u = _mm256_set1_ps(1.0f / 17.0f);
+    __m256 c2 = _mm256_mul_ps(c, c);
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(-1.0f / 15.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(1.0f / 13.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(-1.0f / 11.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(1.0f / 9.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(-1.0f / 7.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(1.0f / 5.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(-1.0f / 3.0f));
+    u = _mm256_add_ps(_mm256_mul_ps(u, c2), _mm256_set1_ps(1.0f));
+    __m256 cu = _mm256_mul_ps(c, u);
+    __m256 th = _mm256_add_ps(cu, cu);  // halving undo: 2× exact via + self
+    // folds, all exact ±: octant swap, then the x<0 quadrants (θ ≤ π/2 here)
+    __m256 tswap = _mm256_sub_ps(_mm256_set1_ps((float)M_PI * 0.5f), th);
+    th = _mm256_blendv_ps(th, tswap, _mm256_cmp_ps(ay, ax, _CMP_GT_OQ));
+    th = _mm256_blendv_ps(
+        th, _mm256_sub_ps(_mm256_set1_ps((float)M_PI), th),
+        _mm256_cmp_ps(x, zero, _CMP_LT_OQ));
+    // (0,0) lane: scalar atan2(±0,+0) = ±0 — reset the NaN reduction to +0
+    th = _mm256_blendv_ps(th, zero, _mm256_cmp_ps(mx, zero, _CMP_EQ_OQ));
+    // copysign via y's sign bit (θ ≥ 0, so OR reattaches exactly ±θ)
+    return _mm256_or_ps(th, _mm256_and_ps(z, sign));
 }
 
 // hash2_lattice across lanes: in-domain integer lanes gather the same table
@@ -2684,10 +2725,10 @@ static void skydome_rows_avx2(float* col, float* dep, int w, int h, int y0, int 
                 c2v = _mm256_add_ps(c2v, _mm256_mul_ps(_mm256_set1_ps(pal[8]), wv));
             }
             if (need_stars) {
-                // atan2f lane extraction (stored in the shared helper): 8
-                // scalar calls, bit-identical to the per-pixel scalar body
+                // Tier B atan2f: shared vector polynomial (region-gated;
+                // scalar path keeps the exact libm call)
                 __m256 uv0 = _mm256_add_ps(
-                    _mm256_div_ps(_mm256_div_ps(atan2f_lanes256(nz, nx), kpi), ktwo), half);
+                    _mm256_div_ps(_mm256_div_ps(atan2f_vec256(nz, nx), kpi), ktwo), half);
                 __m256 uv1 = _mm256_add_ps(_mm256_mul_ps(ny, half), half);
                 __m256 sp0 = _mm256_mul_ps(uv0, k380);
                 __m256 sp1 = _mm256_mul_ps(uv1, k190);
@@ -2774,7 +2815,8 @@ static skydome_kfn skydome_kernel() {
 }
 
 // Half-res nebula prepass, AVX2 half. Per lane: ray (same hoists/shared
-// normalize helper), lane-extracted atan2f, then fbm2 in lanes — 2 octaves ×
+// normalize helper), the Tier B atan2f_vec256 polynomial, then fbm2 in lanes —
+// 2 octaves ×
 // 4 corner gathers with the exact scalar hash2 fallback blended on
 // out-of-domain lanes (bird/fuzz scenes never leave the table domain; the
 // fallback exists so out-of-range scenes can't silently change values).
@@ -2833,7 +2875,7 @@ static void cloud_rows_avx2(float* cl, int hw, int hh, int y0, int y1, int w, in
             __m256 nx, ny, nz;
             norm_ray_lanes256(dx, dy, dz, &nx, &ny, &nz);
             __m256 uv0 = _mm256_add_ps(
-                _mm256_div_ps(_mm256_div_ps(atan2f_lanes256(nz, nx), kpi), ktwo), half);
+                _mm256_div_ps(_mm256_div_ps(atan2f_vec256(nz, nx), kpi), ktwo), half);
             __m256 uv1 = _mm256_add_ps(_mm256_mul_ps(ny, half), half);
             // qx = (uv0*7 + t*pal[11]*0.018)*2, qy likewise with 3.5/0.009
             __m256 qx = _mm256_mul_ps(_mm256_add_ps(_mm256_mul_ps(uv0, k7), kd18), ktwo);
