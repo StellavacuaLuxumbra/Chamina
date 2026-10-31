@@ -1141,28 +1141,134 @@ struct StarTable {
     col[2] *= sink;
 }
 
-static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12]) {
-    const int w = f.w, h = f.h;
+// ---------------------------------------------------------------------------
+// skydome full-res pixel loop, split for SIMD. The scalar kernel is a verbatim
+// transcription of the row loop that used to live in draw_skydome (same op
+// order, same casts, same LUT item reads). The AVX2 kernel (defined next to
+// the other dispatch kernels, after the grade stage) is lane-for-lane
+// identical: atan2f stays a scalar call per lane (lane extraction), sqrt /
+// divide / floor run on the vector unit, and LUT / bilinear gathers read the
+// same table entries at the same clamped indices. Star-cell gather indices are
+// additionally clamped so a pathological lane cannot gather past the tables
+// (the scalar body would read wild memory there; gate renders never hit it).
+// Gate: still-image byte A/B must stay EQUAL.
+// ---------------------------------------------------------------------------
+using skydome_kfn = void (*)(float* col, float* dep, int w, int h, int y0, int y1,
+                             const float* fwd, const float* rgt, const float* up, float tan_h,
+                             float aspect, const float* pal, int need_cloud, int need_stars,
+                             const float* cloud, int hw, int hh, const float* cell_tw);
 
-    // 1-D LUTs for the two transcendental per-pixel terms (outputs are mixed
-    // into gradients far below 8-bit significance).
-    static const float* lut_pow085 = [] {
+// 1-D LUTs for the two transcendental per-pixel terms (outputs are mixed
+// into gradients far below 8-bit significance). Former static locals inside
+// draw_skydome, hoisted to file scope so both kernels gather the same tables;
+// the build stays lazy exactly as before.
+static const float* skydome_lut_pow085() {
+    static const float* p = [] {
         static float v[4097];
         for (int i = 0; i <= 4096; i++) v[i] = powf((float)i / 4096, 0.85f);
-        return v;
+        return &v[0];
     }();
-    static const float* lut_exp5 = [] {
+    return p;
+}
+static const float* skydome_lut_exp5() {
+    static const float* p = [] {
         static float v[2049];
         for (int i = 0; i <= 2048; i++) v[i] = expf(-(float)i / 2048 * 5.0f);
-        return v;
+        return &v[0];
     }();
-    auto lut = [](const float* lutv, int n, float x) {
-        float xx = clamp(x, 0.0f, 1.0f) * n;
-        int i = (int)xx;
-        if (i > n - 1) i = n - 1;
-        float fr = xx - i;
-        return lutv[i] + (lutv[i + 1] - lutv[i]) * fr;
-    };
+    return p;
+}
+// Exact body of the lambda that used to live in draw_skydome.
+static inline float sky_lut(const float* lutv, int n, float x) {
+    float xx = clamp(x, 0.0f, 1.0f) * n;
+    int i = (int)xx;
+    if (i > n - 1) i = n - 1;
+    float fr = xx - i;
+    return lutv[i] + (lutv[i + 1] - lutv[i]) * fr;
+}
+
+// One full-res skydome pixel, byte-for-byte the former row-loop body of
+// draw_skydome. Shared by the scalar kernel and the AVX2 tail.
+static inline void skydome_px_scalar(float* col, float* dep, int w, int h, int row, int col_i,
+                                     const float* fwd, const float* rgt, const float* up,
+                                     float tan_h, float aspect, float yn, const float* pal,
+                                     int need_cloud, int need_stars, const float* cloud, int hw,
+                                     int hh, const float* cell_tw, const StarTable& st) {
+    float xn = 2 * (col_i + 0.5f) / w - 1;
+    Vec3 d = (Vec3{fwd[0], fwd[1], fwd[2]} +
+              Vec3{rgt[0], rgt[1], rgt[2]} * (xn * tan_h * aspect) +
+              Vec3{up[0], up[1], up[2]} * (yn * tan_h))
+                 .normalize();
+    // gradient (powf → LUT)
+    float h01 = clamp(d.y * 0.5f + 0.5f, 0.0f, 1.0f);
+    float mixv = sky_lut(skydome_lut_pow085(), 4096, h01);
+    float c[3];
+    for (int i = 0; i < 3; i++) c[i] = pal[3 + i] + (pal[i] - pal[3 + i]) * mixv;
+    // nebula cloud (half-res field) + horizon band (expf → LUT)
+    if (need_cloud) {
+        float cx = (col_i + 0.5f) * hw / w - 0.5f;
+        float cy = (row + 0.5f) * hh / h - 0.5f;
+        int x0 = (int)floorf(max(cx, 0.0f));
+        int y0 = (int)floorf(max(cy, 0.0f));
+        int x1 = min(x0 + 1, hw - 1), y1 = min(y0 + 1, hh - 1);
+        float tx = clamp(cx - x0, 0.0f, 1.0f), ty = clamp(cy - y0, 0.0f, 1.0f);
+        float cval = (cloud[(size_t)y0 * hw + x0] * (1 - tx) +
+                      cloud[(size_t)y0 * hw + x1] * tx) *
+                         (1 - ty) +
+                     (cloud[(size_t)y1 * hw + x0] * (1 - tx) +
+                      cloud[(size_t)y1 * hw + x1] * tx) *
+                         ty;
+        float band = sky_lut(skydome_lut_exp5(), 2048, fabsf(d.y));
+        for (int i = 0; i < 3; i++)
+            c[i] += pal[6 + i] * (cval * pal[9] * 0.95f + band * pal[9] * 0.30f);
+    }
+    if (need_stars) {
+        float uv0 = atan2f(d.z, d.x) / (float)M_PI / 2 + 0.5f;
+        float uv1 = d.y * 0.5f + 0.5f;
+        float sp0 = uv0 * 380, sp1 = uv1 * 190;
+        float c0 = floorf(sp0), c1 = floorf(sp1);
+        size_t ci = (size_t)(int)c1 * StarTable::CW + (int)c0;
+        float r = st.r[ci];
+        float f0 = sp0 - c0 - 0.5f, f1 = sp1 - c1 - 0.5f;
+        float j0 = st.j0[ci];
+        float j1 = st.j1[ci];
+        float dd = sqrtf((f0 - j0 * 0.6f) * (f0 - j0 * 0.6f) +
+                         (f1 - j1 * 0.6f) * (f1 - j1 * 0.6f));
+        float kk = clamp((dd - 0.16f) / -0.16f, 0.0f, 1.0f);
+        float star = kk * kk * (3 - 2 * kk);
+        float tw = cell_tw[ci];
+        float on = r <= 0.055f ? 1.0f : 0.0f;
+        float add[3] = {0.78f, 0.86f, 1.0f};
+        for (int i = 0; i < 3; i++) c[i] += add[i] * star * on * tw * pal[10] * 1.7f;
+    }
+    float rad = clamp(sqrtf(d.x * d.x + d.y * d.y) * 1.15f, 0.0f, 1.0f);
+    float sink = 1 - 0.30f * rad * rad;
+    size_t oi = ((size_t)row * w + col_i) * 3;
+    col[oi] = c[0] * sink;
+    col[oi + 1] = c[1] * sink;
+    col[oi + 2] = c[2] * sink;
+    dep[(size_t)row * w + col_i] = 300.0f;
+}
+
+static void skydome_rows_scalar(float* col, float* dep, int w, int h, int y0, int y1,
+                                const float* fwd, const float* rgt, const float* up, float tan_h,
+                                float aspect, const float* pal, int need_cloud, int need_stars,
+                                const float* cloud, int hw, int hh, const float* cell_tw) {
+    const StarTable& st = StarTable::get();
+    for (int row = y0; row < y1; row++) {
+        float py = row + 0.5f;
+        float yn = 1 - 2 * py / h;
+        for (int col_i = 0; col_i < w; col_i++)
+            skydome_px_scalar(col, dep, w, h, row, col_i, fwd, rgt, up, tan_h, aspect, yn, pal,
+                              need_cloud, need_stars, cloud, hw, hh, cell_tw, st);
+    }
+}
+
+// Defined after the grade stage (needs the AVX2 infrastructure further down).
+static skydome_kfn skydome_kernel();
+
+static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12]) {
+    const int w = f.w, h = f.h;
 
     // The nebula is the expensive part (8 sinf per pixel in fbm) and is pure
     // low frequency: sample it at half resolution and bilinear upsample. The
@@ -1205,63 +1311,25 @@ static void draw_skydome(Frame& f, const Cam& cam, float t, const float pal[12])
         for (long i = 0; i < (long)StarTable::CW * StarTable::CH; i++)
             cell_tw[i] = 0.55f + 0.45f * sinf(t * 1.7f + st.r[i] * 40);
     }
-#pragma omp parallel for schedule(static)
-    for (int row = 0; row < h; row++) {
-        float py = row + 0.5f;
-        float yn = 1 - 2 * py / h;
-        for (int col_i = 0; col_i < w; col_i++) {
-            float xn = 2 * (col_i + 0.5f) / w - 1;
-            Vec3 d = (cam.fwd + cam.right * (xn * cam.tan_h * cam.aspect) +
-                      cam.up * (yn * cam.tan_h))
-                         .normalize();
-            // gradient (powf → LUT)
-            float h01 = clamp(d.y * 0.5f + 0.5f, 0.0f, 1.0f);
-            float mixv = lut(lut_pow085, 4096, h01);
-            float col[3];
-            for (int i = 0; i < 3; i++)
-                col[i] = pal[3 + i] + (pal[i] - pal[3 + i]) * mixv;
-            // nebula cloud (half-res field) + horizon band (expf → LUT)
-            if (need_cloud) {
-                float cx = (col_i + 0.5f) * hw / w - 0.5f;
-                float cy = (row + 0.5f) * hh / h - 0.5f;
-                int x0 = (int)floorf(max(cx, 0.0f));
-                int y0 = (int)floorf(max(cy, 0.0f));
-                int x1 = min(x0 + 1, hw - 1), y1 = min(y0 + 1, hh - 1);
-                float tx = clamp(cx - x0, 0.0f, 1.0f), ty = clamp(cy - y0, 0.0f, 1.0f);
-                float cval = (cloud[(size_t)y0 * hw + x0] * (1 - tx) +
-                              cloud[(size_t)y0 * hw + x1] * tx) * (1 - ty) +
-                             (cloud[(size_t)y1 * hw + x0] * (1 - tx) +
-                              cloud[(size_t)y1 * hw + x1] * tx) * ty;
-                float band = lut(lut_exp5, 2048, fabsf(d.y));
-                for (int i = 0; i < 3; i++)
-                    col[i] += pal[6 + i] * (cval * pal[9] * 0.95f + band * pal[9] * 0.30f);
-            }
-            if (need_stars) {
-                float uv0 = atan2f(d.z, d.x) / (float)M_PI / 2 + 0.5f;
-                float uv1 = d.y * 0.5f + 0.5f;
-                float sp0 = uv0 * 380, sp1 = uv1 * 190;
-                float c0 = floorf(sp0), c1 = floorf(sp1);
-                const StarTable& st = StarTable::get();
-                size_t ci = (size_t)(int)c1 * StarTable::CW + (int)c0;
-                float r = st.r[ci];
-                float f0 = sp0 - c0 - 0.5f, f1 = sp1 - c1 - 0.5f;
-                float j0 = st.j0[ci];
-                float j1 = st.j1[ci];
-                float dd = sqrtf((f0 - j0 * 0.6f) * (f0 - j0 * 0.6f) +
-                                 (f1 - j1 * 0.6f) * (f1 - j1 * 0.6f));
-                float kk = clamp((dd - 0.16f) / -0.16f, 0.0f, 1.0f);
-                float star = kk * kk * (3 - 2 * kk);
-                float tw = cell_tw[ci];
-                float on = r <= 0.055f ? 1.0f : 0.0f;
-                float add[3] = {0.78f, 0.86f, 1.0f};
-                for (int i = 0; i < 3; i++) col[i] += add[i] * star * on * tw * pal[10] * 1.7f;
-            }
-            float rad = clamp(sqrtf(d.x * d.x + d.y * d.y) * 1.15f, 0.0f, 1.0f);
-            float sink = 1 - 0.30f * rad * rad;
-            f.color[(size_t)row * w + col_i] = {col[0] * sink, col[1] * sink, col[2] * sink};
-            f.depth[(size_t)row * w + col_i] = 300.0f;
-        }
+    // Full-res pixel loop, row-blocked across threads (both kernels write only
+    // their own rows; cloud/cell_tw prepasses above are untouched).
+    float* colp = (float*)f.color.data();
+    float* depp = f.depth.data();
+    skydome_kfn fn = skydome_kernel();
+#ifdef _OPENMP
+#pragma omp parallel
+    {
+        int T = omp_get_num_threads(), tk = omp_get_thread_num();
+        int y0 = (int)((long long)h * tk / T), y1 = (int)((long long)h * (tk + 1) / T);
+        if (y0 < y1)
+            fn(colp, depp, w, h, y0, y1, &cam.fwd.x, &cam.right.x, &cam.up.x, cam.tan_h,
+               cam.aspect, pal, need_cloud ? 1 : 0, need_stars ? 1 : 0, cloud.data(), hw, hh,
+               cell_tw.data());
     }
+#else
+    fn(colp, depp, w, h, 0, h, &cam.fwd.x, &cam.right.x, &cam.up.x, cam.tan_h, cam.aspect, pal,
+       need_cloud ? 1 : 0, need_stars ? 1 : 0, cloud.data(), hw, hh, cell_tw.data());
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -2319,6 +2387,253 @@ static void grade_into(const Img& src, int w, int h, float chromatic, float vign
 #else
     fn(src.data()[0].data(), w, h, 0, h, chromatic, vignette, saturation, flash, out.data()[0].data());
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// skydome AVX2 kernel (placed after the grade stage: needs the dispatch
+// infrastructure above). Lane-for-lane transcription of skydome_px_scalar:
+// per-lane op order unchanged, atan2f by lane extraction (8 scalar calls per
+// 8 pixels — bit-identical), sqrt / divide / floor on the vector unit, LUT /
+// bilinear / star-cell gathers hit the same entries at the same clamped
+// indices. Star-cell indices are clamped to the table only for gather safety:
+// in-band lanes need no clamp, and the only lanes that would, are precisely
+// the ones where the scalar body's unchecked (size_t)(int)c1 * CW + (int)c0
+// arithmetic already reads wild memory (d.y → ±1 makes c1 hit 190, i.e. the
+// last row of the table plus up to 80 floats — gate renders keep rays off the
+// exact pole, same situation as before the kernel existed).
+// ---------------------------------------------------------------------------
+#if CHAMINA_SIMD_AVX2
+// sky_lut across lanes: x = clamp(v,0,1)*n; the scalar clamps i BEFORE taking
+// the fractional part ("if (i > n-1) i = n-1; fr = x - i"), like the srgb LUT.
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static inline __m256 sky_lut_lanes256(__m256 v, const float* lutv, int n) {
+    __m256 x = _mm256_min_ps(_mm256_max_ps(v, _mm256_setzero_ps()), _mm256_set1_ps(1.0f)) *
+               _mm256_set1_ps((float)n);
+    __m256i iu = _mm256_cvttps_epi32(x);
+    __m256i ic = _mm256_min_epi32(iu, _mm256_set1_epi32(n - 1));
+    __m256 fr = _mm256_sub_ps(x, _mm256_cvtepi32_ps(ic));
+    __m256i ib = _mm256_min_epi32(_mm256_add_epi32(ic, _mm256_set1_epi32(1)), _mm256_set1_epi32(n));
+    __m256 l0 = _mm256_i32gather_ps(lutv, ic, 4);
+    __m256 l1 = _mm256_i32gather_ps(lutv, ib, 4);
+    return _mm256_add_ps(l0, _mm256_mul_ps(_mm256_sub_ps(l1, l0), fr));
+}
+
+__attribute__((target("avx2"), optimize("fp-contract=off")))
+static void skydome_rows_avx2(float* col, float* dep, int w, int h, int y0, int y1,
+                              const float* fwd, const float* rgt, const float* up, float tan_h,
+                              float aspect, const float* pal, int need_cloud, int need_stars,
+                              const float* cloud, int hw, int hh, const float* cell_tw) {
+    const StarTable& st = StarTable::get();
+    const float* lp085 = skydome_lut_pow085();
+    const float* lx5 = skydome_lut_exp5();
+    const __m256 half = _mm256_set1_ps(0.5f);
+    const __m256 one = _mm256_set1_ps(1.0f);
+    const __m256 zero = _mm256_setzero_ps();
+    const __m256i kzero = _mm256_setzero_si256();
+    const __m256i klanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+    const __m256i kone = _mm256_set1_epi32(1);
+    const __m256 kfx = _mm256_set1_ps(fwd[0]);
+    const __m256 kfy = _mm256_set1_ps(fwd[1]);
+    const __m256 kfz = _mm256_set1_ps(fwd[2]);
+    const __m256 krx = _mm256_set1_ps(rgt[0]);
+    const __m256 kry = _mm256_set1_ps(rgt[1]);
+    const __m256 krz = _mm256_set1_ps(rgt[2]);
+    const __m256 kux = _mm256_set1_ps(up[0]);
+    const __m256 kuy = _mm256_set1_ps(up[1]);
+    const __m256 kuz = _mm256_set1_ps(up[2]);
+    const __m256 kt = _mm256_set1_ps(tan_h);
+    const __m256 ka = _mm256_set1_ps(aspect);
+    const __m256 kw = _mm256_set1_ps((float)w);
+    const __m256 kchw = _mm256_set1_ps((float)hw);
+    const __m256 kpi = _mm256_set1_ps((float)M_PI);
+    const __m256 ktwo = _mm256_set1_ps(2.0f);
+    const __m256 k380 = _mm256_set1_ps(380.0f);
+    const __m256 k190 = _mm256_set1_ps(190.0f);
+    const __m256 k006 = _mm256_set1_ps(0.6f);
+    const __m256 k016 = _mm256_set1_ps(0.16f);
+    const __m256 km16 = _mm256_set1_ps(-0.16f);
+    const __m256 k0055 = _mm256_set1_ps(0.055f);
+    const __m256 k115 = _mm256_set1_ps(1.15f);
+    const __m256 k030 = _mm256_set1_ps(0.30f);
+    const __m256 k095 = _mm256_set1_ps(0.95f);
+    const __m256 kp9 = _mm256_set1_ps(pal[9]);
+    const __m256 kp10b = _mm256_set1_ps(pal[10]);
+    const __m256 k17 = _mm256_set1_ps(1.7f);
+    const __m256 kpa0 = _mm256_set1_ps(0.78f);
+    const __m256 kpa1 = _mm256_set1_ps(0.86f);
+    const __m256 kpa2 = one;  // add[2] is 1.0f — same bits, no semantic slip
+    const __m256i kc = _mm256_set1_epi32(StarTable::CW);
+    const __m256i kn1 = _mm256_set1_epi32(StarTable::CW * StarTable::CH - 1);
+    const __m256i khw1 = _mm256_set1_epi32(hw - 1);
+    const __m256 p3b0 = _mm256_set1_ps(pal[3]), p0b0 = _mm256_set1_ps(pal[0]);
+    const __m256 p3b1 = _mm256_set1_ps(pal[4]), p0b1 = _mm256_set1_ps(pal[1]);
+    const __m256 p3b2 = _mm256_set1_ps(pal[5]), p0b2 = _mm256_set1_ps(pal[2]);
+    for (int row = y0; row < y1; row++) {
+        float py = row + 0.5f;
+        float yn = 1 - 2 * py / h;
+        // up term hoisted per row — the very scalar product the pixel body
+        // would compute per pixel (up* (yn*tan_h), components mul'd after)
+        const __m256 kb0 = _mm256_set1_ps(yn * tan_h);
+        const __m256 upxb = _mm256_mul_ps(kux, kb0);
+        const __m256 upyb = _mm256_mul_ps(kuy, kb0);
+        const __m256 upzb = _mm256_mul_ps(kuz, kb0);
+        // cloud row invariants: the y side of the bilinear fetch is per-row
+        const float cyv = (row + 0.5f) * hh / h - 0.5f;
+        const int y0c = (int)floorf(max(cyv, 0.0f));
+        const int y1c = min(y0c + 1, hh - 1);
+        const float tyv = clamp(cyv - y0c, 0.0f, 1.0f);
+        const __m256 tyb = _mm256_set1_ps(tyv);
+        const __m256i ky0 = _mm256_set1_epi32(y0c * hw);
+        const __m256i ky1 = _mm256_set1_epi32(y1c * hw);
+        int x = 0;
+        for (; x + 8 <= w; x += 8) {
+            __m256i kb = _mm256_add_epi32(klanes, _mm256_set1_epi32(x));
+            __m256 xf = _mm256_cvtepi32_ps(kb);
+            // xn = 2*(x+0.5)/w - 1  (2*(exact) via + self is bit-exact)
+            __m256 xh = _mm256_add_ps(xf, half);
+            __m256 xn = _mm256_sub_ps(_mm256_div_ps(_mm256_add_ps(xh, xh), kw), one);
+            // d = fwd + right*(xn*tan*aspect) + up*(yn*tan), op order preserved
+            __m256 rks = _mm256_mul_ps(_mm256_mul_ps(xn, kt), ka);
+            __m256 dx = _mm256_add_ps(_mm256_add_ps(kfx, _mm256_mul_ps(krx, rks)), upxb);
+            __m256 dy = _mm256_add_ps(_mm256_add_ps(kfy, _mm256_mul_ps(kry, rks)), upyb);
+            __m256 dz = _mm256_add_ps(_mm256_add_ps(kfz, _mm256_mul_ps(krz, rks)), upzb);
+            // normalize: l = sqrt(dot), dot = (x²+y²)+z² left-assoc as dot()
+            __m256 d2 = _mm256_add_ps(
+                _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy)),
+                _mm256_mul_ps(dz, dz));
+            __m256 len = _mm256_sqrt_ps(d2);
+            __m256 lmask = _mm256_cmp_ps(len, zero, _CMP_GT_OQ);
+            __m256 nx = _mm256_blendv_ps(zero, _mm256_div_ps(dx, len), lmask);
+            __m256 ny = _mm256_blendv_ps(zero, _mm256_div_ps(dy, len), lmask);
+            __m256 nz = _mm256_blendv_ps(zero, _mm256_div_ps(dz, len), lmask);
+            // gradient: pow085 LUT (the helper's clamp duplicates the h01 clamp
+            // idempotently, same as clamping twice in the scalar body)
+            __m256 mixv = sky_lut_lanes256(
+                _mm256_add_ps(_mm256_mul_ps(ny, half), half), lp085, 4096);
+            __m256 c0v = _mm256_add_ps(p3b0, _mm256_mul_ps(_mm256_sub_ps(p0b0, p3b0), mixv));
+            __m256 c1v = _mm256_add_ps(p3b1, _mm256_mul_ps(_mm256_sub_ps(p0b1, p3b1), mixv));
+            __m256 c2v = _mm256_add_ps(p3b2, _mm256_mul_ps(_mm256_sub_ps(p0b2, p3b2), mixv));
+            if (need_cloud) {
+                // cx = (x+0.5)*hw/w - 0.5 per lane; x0 floor→int, tx clamped
+                __m256 cxv = _mm256_sub_ps(
+                    _mm256_div_ps(_mm256_mul_ps(_mm256_add_ps(xf, half), kchw), kw), half);
+                __m256i x0i = _mm256_cvttps_epi32(_mm256_floor_ps(_mm256_max_ps(cxv, zero)));
+                __m256i x1i = _mm256_min_epi32(_mm256_add_epi32(x0i, kone), khw1);
+                __m256 tx = _mm256_min_ps(
+                    _mm256_max_ps(_mm256_sub_ps(cxv, _mm256_cvtepi32_ps(x0i)), zero), one);
+                // 4 gathers; the bilinear blend keeps the scalar's op order
+                __m256 g00 = _mm256_i32gather_ps(cloud, _mm256_add_epi32(ky0, x0i), 4);
+                __m256 g01 = _mm256_i32gather_ps(cloud, _mm256_add_epi32(ky0, x1i), 4);
+                __m256 g10 = _mm256_i32gather_ps(cloud, _mm256_add_epi32(ky1, x0i), 4);
+                __m256 g11 = _mm256_i32gather_ps(cloud, _mm256_add_epi32(ky1, x1i), 4);
+                __m256 omtx = _mm256_sub_ps(one, tx);
+                __m256 omty = _mm256_sub_ps(one, tyb);
+                __m256 cval = _mm256_add_ps(
+                    _mm256_mul_ps(
+                        _mm256_add_ps(_mm256_mul_ps(g00, omtx), _mm256_mul_ps(g01, tx)), omty),
+                    _mm256_mul_ps(
+                        _mm256_add_ps(_mm256_mul_ps(g10, omtx), _mm256_mul_ps(g11, tx)), tyb));
+                // band = lut(|ny| → exp5 LUT)
+                __m256 band = sky_lut_lanes256(_mm256_andnot_ps(_mm256_set1_ps(-0.0f), ny), lx5,
+                                               2048);
+                __m256 wv = _mm256_add_ps(_mm256_mul_ps(_mm256_mul_ps(cval, kp9), k095),
+                                          _mm256_mul_ps(_mm256_mul_ps(band, kp9), k030));
+                c0v = _mm256_add_ps(c0v, _mm256_mul_ps(_mm256_set1_ps(pal[6]), wv));
+                c1v = _mm256_add_ps(c1v, _mm256_mul_ps(_mm256_set1_ps(pal[7]), wv));
+                c2v = _mm256_add_ps(c2v, _mm256_mul_ps(_mm256_set1_ps(pal[8]), wv));
+            }
+            if (need_stars) {
+                // atan2f lane extraction: 8 scalar calls, bit-identical to the
+                // per-pixel scalar body
+                alignas(32) float zb[8], xb[8], ab[8];
+                _mm256_store_ps(zb, nz);
+                _mm256_store_ps(xb, nx);
+                for (int k = 0; k < 8; k++) ab[k] = atan2f(zb[k], xb[k]);
+                __m256 uv0 = _mm256_add_ps(
+                    _mm256_div_ps(_mm256_div_ps(_mm256_load_ps(ab), kpi), ktwo), half);
+                __m256 uv1 = _mm256_add_ps(_mm256_mul_ps(ny, half), half);
+                __m256 sp0 = _mm256_mul_ps(uv0, k380);
+                __m256 sp1 = _mm256_mul_ps(uv1, k190);
+                __m256 c0f = _mm256_floor_ps(sp0);
+                __m256 c1f = _mm256_floor_ps(sp1);
+                // cell index = (int)c1 * CW + (int)c0, clamped for gather safety
+                __m256i ci = _mm256_add_epi32(
+                    _mm256_mullo_epi32(_mm256_cvttps_epi32(c1f), kc),
+                    _mm256_cvttps_epi32(c0f));
+                __m256i cig = _mm256_min_epi32(_mm256_max_epi32(ci, kzero), kn1);
+                __m256 rv = _mm256_i32gather_ps(st.r, cig, 4);
+                __m256 j0v = _mm256_i32gather_ps(st.j0, cig, 4);
+                __m256 j1v = _mm256_i32gather_ps(st.j1, cig, 4);
+                __m256 twv = _mm256_i32gather_ps(cell_tw, cig, 4);
+                __m256 f0v = _mm256_sub_ps(_mm256_sub_ps(sp0, c0f), half);
+                __m256 f1v = _mm256_sub_ps(_mm256_sub_ps(sp1, c1f), half);
+                __m256 dv0 = _mm256_sub_ps(f0v, _mm256_mul_ps(j0v, k006));
+                __m256 dv1 = _mm256_sub_ps(f1v, _mm256_mul_ps(j1v, k006));
+                __m256 dd = _mm256_sqrt_ps(
+                    _mm256_add_ps(_mm256_mul_ps(dv0, dv0), _mm256_mul_ps(dv1, dv1)));
+                __m256 kk = _mm256_min_ps(
+                    _mm256_max_ps(_mm256_div_ps(_mm256_sub_ps(dd, k016), km16), zero), one);
+                // star = kk² * (3 - 2*kk); 2*kk exact via + self
+                __m256 stv = _mm256_mul_ps(
+                    _mm256_mul_ps(kk, kk),
+                    _mm256_sub_ps(_mm256_set1_ps(3.0f), _mm256_add_ps(kk, kk)));
+                __m256 onv = _mm256_blendv_ps(zero, one, _mm256_cmp_ps(rv, k0055, _CMP_LE_OQ));
+                __m256 k0 = _mm256_mul_ps(kpa0, stv);
+                k0 = _mm256_mul_ps(k0, onv);
+                k0 = _mm256_mul_ps(k0, twv);
+                k0 = _mm256_mul_ps(k0, kp10b);
+                k0 = _mm256_mul_ps(k0, k17);
+                c0v = _mm256_add_ps(c0v, k0);
+                __m256 k1 = _mm256_mul_ps(kpa1, stv);
+                k1 = _mm256_mul_ps(k1, onv);
+                k1 = _mm256_mul_ps(k1, twv);
+                k1 = _mm256_mul_ps(k1, kp10b);
+                k1 = _mm256_mul_ps(k1, k17);
+                c1v = _mm256_add_ps(c1v, k1);
+                __m256 k2 = _mm256_mul_ps(kpa2, stv);
+                k2 = _mm256_mul_ps(k2, onv);
+                k2 = _mm256_mul_ps(k2, twv);
+                k2 = _mm256_mul_ps(k2, kp10b);
+                k2 = _mm256_mul_ps(k2, k17);
+                c2v = _mm256_add_ps(c2v, k2);
+            }
+            // sink dim: rad on the *normalized* d, (0.30*rad)*rad order kept
+            __m256 rad = _mm256_mul_ps(
+                _mm256_sqrt_ps(
+                    _mm256_add_ps(_mm256_mul_ps(nx, nx), _mm256_mul_ps(ny, ny))),
+                k115);
+            rad = _mm256_min_ps(_mm256_max_ps(rad, zero), one);
+            __m256 sink = _mm256_sub_ps(one, _mm256_mul_ps(_mm256_mul_ps(k030, rad), rad));
+            __m256 e0 = _mm256_mul_ps(c0v, sink);
+            __m256 e1 = _mm256_mul_ps(c1v, sink);
+            __m256 e2 = _mm256_mul_ps(c2v, sink);
+            // interleave (AoS) and store: 8 pixels × 3 floats, contiguous slice
+            alignas(32) float tmp[24];
+            _mm256_store_ps(tmp + 0, e0);
+            _mm256_store_ps(tmp + 8, e1);
+            _mm256_store_ps(tmp + 16, e2);
+            float* op = col + ((size_t)row * w + x) * 3;
+            for (int p = 0; p < 8; p++) {
+                op[p * 3] = tmp[p];
+                op[p * 3 + 1] = tmp[8 + p];
+                op[p * 3 + 2] = tmp[16 + p];
+            }
+            _mm256_storeu_ps(dep + (size_t)row * w + x, _mm256_set1_ps(300.0f));
+        }
+        for (int xi = x; xi < w; xi++)
+            skydome_px_scalar(col, dep, w, h, row, xi, fwd, rgt, up, tan_h, aspect, yn, pal,
+                              need_cloud, need_stars, cloud, hw, hh, cell_tw, st);
+    }
+}
+#endif
+
+static skydome_kfn skydome_kernel() {
+    static skydome_kfn fn =
+#if CHAMINA_SIMD_AVX2
+        simd_avx2() ? &skydome_rows_avx2 :
+#endif
+        &skydome_rows_scalar;
+    return fn;
 }
 
 // Full post chain, in place on f.color (safe: both paths consume the result

@@ -668,9 +668,50 @@ harness 改用**值保持**的宽域形态（全 3 位小数、只变表示不�
 - amalgamation 39070 行再生成，宿主验证：example 单 TU（-Idist）编译
   + 渲染与 CLI 路径逐字节相等；api-only 二 TU 干净。
 
+**skydome Tier A 批（2026-10-31 同日第二批）**：全幅像素循环向量化——
+- 范围：draw_skydome 的 row×col 主循环。原循环体逐字抽成
+  `skydome_px_scalar`（scalar kernel 与 AVX2 尾循环共用）；成对内核
+  `skydome_rows_scalar` / `skydome_rows_avx2` + `skydome_kernel()` 分发
+  （沿用 tonemap/grade 的调用模式）；`=lut_pow085/lut_exp5` 两个 LUT 从
+  draw_skydome 局部 static 提升为文件作用域 getter（懒初始化语义不变），
+  lane 侧 `sky_lut_lanes256` 延续「钳 i 后取小数」语义；
+- per-lane 顺序逐字复刻：`normalize` 用 `(x²+y²)+z²` 结合序 + 硬件
+  sqrt/div + `l>0` blend 判零；gradient/ horizon 两 LUT gather 同表项；
+  半分辨 cloud 双线性改 4×gather（`(1-tx)` 等精确子式保序）；
+- **atan2f = lane 提取**：每 lane 一次标量 `atan2f` 调用（store 提 lane →
+  8×标量 → load 回），位精确；其余星点数学（floorf→cvttps、StarTable
+  `r/j0/j1` 与 `cell_tw` 四路同 ci gather、`sqrt/div/min/max`）全在
+  lane 上；
+- **星点 ci 钳位（crash-safety，非语义）**：标量体
+  `(size_t)(int)c1*CW+(int)c0` 在 `d.y→±1` 时可达 190*381+380 = 72850
+  > 72771（表尺寸）——标量本就 wild-read 表尾之后 ~80 floats（历史帧
+  从未触达极点）。lane 侧 gather 若不钳会段错误，故
+  `cig = clamp(ci, 0, CW*CH-1)`；钳位 lane 与标量仅在上述病理 lane
+  分叉，`CHAMINA_NO_SIMD=1` 复现标量行为可对照；
+- 半分辨 cloud prepass（fbm2 的 8×sinf）与 cell_tw prepass **本批未动**
+  （Tier B 切片对象）；
+- 验收：字节门禁 **8/8 首跑全等**（同 gate_sim.mjs 全家）；官 region
+  门禁三帧与历史值逐项一致（t=8 sky 1.005/horizon 1.014/text 1.030/
+  full 1.020；t=325 带内同历史；t=20.35 维持已知采样伪影）；
+  amalgamation **39385 行**再生，example/api-only 双 TU 编译 + smoke
+  （example 渲染 PNG 与 CLI 门禁 PNG 逐字节相等）。
+- 配对测量（2026-10-31 重启机器后第一轮，同刻交替 5 轮中位，
+  bench_sim_bird 口径）：**本轮新口径下三档同场**：base（=SIMD 前基线）
+  render 70.7 / skydome 57.1 / finish 69.7；
+  new-scalar（=CHAMINA_NO_SIMD=1）render 73.1 / skydome 60.6 /
+  finish 68.6——与 base 同带，证明批内未引入标量侧回归；
+  **new-simd：render 70.7 → 45.0 / skydome 57.1 → 32.1 / finish
+  69.3 → 47.5**。口径注记：finish 段不含 skydome（skydome 在 render
+  内），本机口径下 stage1 的 AVX2 tonemap/grade 效果重测为
+  69.3 → 47.5（历史记录口径 96.6 → 66.9 时基线环境不同——两代测量
+  差异属于热/冷与进程状态，勿混读，以同刻三档为准）。
+- 视频段（同刻交替 3 轮 60 帧，bench_vid 口径）：base 33.5 s
+  （**5.37 fps**）→ new 24.9 s（**7.24 fps**，+35%）。
+
 **wgpu 前瞻**：本批 kernel 都是「全幅连续缓冲上的帧函数段」，签名即
 未来 GPU 后端可按同签名接管的接口位；本会话不引入运行库依赖。
 
-**后续队列**（按收益排）：skydome 全幅循环的 Tier A 部分（normalize/
-sink sqrtf、梯度 LUT lerp 向量化）；星点 atan2f 与 fbm sinf 的 Tier B
-向量多项式（走 region 门禁）；可选 byte-pack 真打包内核。
+**后续队列**（按收益排）：~~skydome 全幅循环的 Tier A~~（**已完成**，
+见上）；半分辨 nebula loop 的 **Tier B**（fbm2 的 8×sinf + atan2f 向量
+多项式，走 region 门禁 ±0.05）；星点 atan2f 的 Tier B 向量多项式；可选
+byte-pack 打包内核。
