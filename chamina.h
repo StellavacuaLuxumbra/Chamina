@@ -1,5 +1,8 @@
 // chamina.h — the whole Chamina engine as a single-header C++ library.
 //
+// GENERATED FILE: assembled by tools/amalgamate.cpp from src/*.cpp. Edit the
+// chunks, not chamina.h; build.bat regenerates the header before compiling.
+//
 // The deliverable software: fonts (stb_truetype), layout, extruded-glyph
 // meshes (earcut), animation/camera/backgrounds (ports of js/anim.mjs +
 // src/animation.rs), software rasterizer, full audio visualisation and the
@@ -97,7 +100,6 @@ int gen_main(int argc, char** argv);    // LRC → scene JSON
 int audio_main(int argc, char** argv);  // audio → spectrum envelope JSON
 
 } // namespace chamina
-
 #ifdef CHAMINA_IMPLEMENTATION
 #include "json.hpp"
 #include "earcut.hpp"
@@ -860,7 +862,6 @@ static Mesh smooth_hull(const Mesh& glyph, float width) {
     }
     return hull;
 }
-
 // ---------------------------------------------------------------------------
 // prepared scene
 // ---------------------------------------------------------------------------
@@ -1817,20 +1818,19 @@ struct World {
     }
 
 };
-
 // ---------------------------------------------------------------------------
 // post (port of src/native/post.rs)
 // ---------------------------------------------------------------------------
 
 using Img = vector<array<float, 3>>;
 
-// Vertical gaussian blur into a caller-owned buffer. NOTE on semantics: the
-// Rust reference (src/native/post.rs blur) computes a horizontal pass into
-// `tmp` that its vertical pass never reads — the effective operation is
-// vertical-only, both implementations agree, and the accepted gold-standard
-// stills were rendered that way. The dead horizontal pass is skipped here.
-// All buffers persist across frames (sizes are constant per scene, so
-// resize() only allocates on the first call — was ~50MB of churn/frame).
+// Separable 2D gaussian blur into a caller-owned buffer: horizontal pass into
+// a scratch image, then a vertical pass from that scratch. The old port
+// inherited a bug from the Rust reference where the vertical pass read `src`
+// again, so bloom/DOF only blurred vertically (visible as vertical light
+// shafts and colour bleed between lines). Fixed here; all buffers persist
+// across frames (sizes are constant per scene, so resize() only allocates on
+// the first call).
 static void blur_into(const Img& src, int w, int h, float sigma, Img& out) {
     int radius = (int)ceilf(sigma * 2.5f);
     float weights[64];
@@ -1842,13 +1842,26 @@ static void blur_into(const Img& src, int w, int h, float sigma, Img& out) {
     sum = sum * 2 - weights[0];
     for (int i = 0; i <= radius; i++) weights[i] /= sum;
     if ((size_t)w * h > out.size()) out.resize((size_t)w * h);
+    static Img tmp;
+    if ((size_t)w * h > tmp.size()) tmp.resize((size_t)w * h);
 #pragma omp parallel for schedule(static)
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             float acc[3] = {0, 0, 0};
             for (int i = 0; i <= radius; i++) {
-                auto& a = src[min(y + i, h - 1) * (size_t)w + x];
-                auto& b = src[max(y - i, 0) * (size_t)w + x];
+                auto& a = src[(size_t)y * w + min(x + i, w - 1)];
+                auto& b = src[(size_t)y * w + max(x - i, 0)];
+                for (int k = 0; k < 3; k++) acc[k] += (a[k] + b[k]) * weights[i];
+            }
+            tmp[(size_t)y * w + x] = {acc[0], acc[1], acc[2]};
+        }
+#pragma omp parallel for schedule(static)
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float acc[3] = {0, 0, 0};
+            for (int i = 0; i <= radius; i++) {
+                auto& a = tmp[min(y + i, h - 1) * (size_t)w + x];
+                auto& b = tmp[max(y - i, 0) * (size_t)w + x];
                 for (int k = 0; k < 3; k++) acc[k] += (a[k] + b[k]) * weights[i];
             }
             out[(size_t)y * w + x] = {acc[0], acc[1], acc[2]};
@@ -2434,7 +2447,6 @@ static void grade_into(const Img& src, int w, int h, float chromatic, float vign
     fn(src.data()[0].data(), w, h, 0, h, chromatic, vignette, saturation, flash, out.data()[0].data());
 #endif
 }
-
 // ---------------------------------------------------------------------------
 // skydome AVX2 kernel (placed after the grade stage: needs the dispatch
 // infrastructure above). Lane-for-lane transcription of skydome_px_scalar:
@@ -2954,7 +2966,6 @@ static float mat_outline_width(const json& spec) {
     if (it == mat.end()) return 0;
     return it->value("width", 0.02f);
 }
-
 // ---------------------------------------------------------------------------
 // gen: LRC → scene JSON (port of js/lrc.js + js/lrc2scene.mjs)
 //
@@ -3873,7 +3884,6 @@ static vector<double> group_char_times(const string& text, const vector<double>&
         }
     return out;
 }
-
 // ---------------------------------------------------------------------------
 // gen: field layout (port of js/layout.mjs layoutField) — serpentine world
 // positions, per-cue camera stops and per-line exits. All double: the output
@@ -4210,7 +4220,6 @@ static vector<Phrase> assign_choreo(const vector<int>& group_counts) {
     }
     return out;
 }
-
 // ---------------------------------------------------------------------------
 // gen: field layout (port of js/layout.mjs layoutField) — serpentine world
 // positions, per-cue camera stops and per-line exits. All double: the output
@@ -4875,7 +4884,6 @@ static vector<ojson> build_lyric_texts(const vector<LrcLine>& lines, const Lyric
     }
     return out;
 }
-
 // ---------------------------------------------------------------------------
 // gen: standalone title/subtitle cards (buildTitleBlock)
 // ---------------------------------------------------------------------------
@@ -5426,7 +5434,6 @@ static vector<double> load_energy(const string& path, const vector<LrcLine>& lin
     for (double v : raw) out.push_back(round3((v - mn) / span));
     return out;
 }
-
 // ---------------------------------------------------------------------------
 // gen: CLI (parseArgs + main)
 // ---------------------------------------------------------------------------
@@ -5944,7 +5951,6 @@ static string find_ffmpeg() {
 #endif
     return "ffmpeg";
 }
-
 // ---------------------------------------------------------------------------
 // audio: offline spectral envelope (port of node js/audio-env.mjs)
 //

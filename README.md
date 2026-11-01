@@ -4,6 +4,10 @@
 里 `#define CHAMINA_IMPLEMENTATION` 后 include 即可渲染。仓库另带一个薄壳
 命令行（`chamina_cli.cpp`）与最小嵌入示例（`example/main.cpp`）。
 
+`chamina.h` 是生成物：可编辑源码在 `src/`，每个文件不超过 1000 行；
+`tools/amalgamate.cpp` 按固定顺序把它们拼成完整的单头文件。构建前会自动
+重新生成，**不要直接改 `chamina.h`**。
+
 与此前的 Rust 参考实现功能对等：字体解析、排版、挤出字形网格、
 动画求值、相机编排、背景时间线、软件光栅、全套音频可视化、后处理、视频
 编码，以及 `gen`（LRC → 场景 JSON）与 `audio`（音轨 → 频谱包络）两个
@@ -31,12 +35,17 @@
 Windows + MinGW-w64（已验证）：
 
 ```bat
-build.bat        → dist\chamina-cpp.exe（静态链接，无运行时 DLL）
+build.bat        → 生成 chamina.h → dist\chamina-cpp.exe（静态链接，无运行时 DLL）
 ```
+
+`build.bat` 先编译 `tools/amalgamate.cpp`，用它把 `src/*.cpp` 拼成
+`chamina.h`，再编译 CLI。任何 chunk 超过 1000 行都会直接报错。
 
 手动构建：
 
 ```bat
+g++ -O2 -std=c++17 tools/amalgamate.cpp -o dist\amalgamate.exe
+dist\amalgamate.exe
 g++ -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ ^
     -Ivendor chamina_cli.cpp -o dist\chamina-cpp.exe -lshell32
 ```
@@ -146,12 +155,14 @@ SIMD 说明：AVX2 内核在运行时按 CPU 能力分发（`__builtin_cpu_suppo
 ## 仓库结构
 
 ```
-chamina.h            单头库（stb 风格，实现 TU 定义 CHAMINA_IMPLEMENTATION）
+chamina.h            生成物：完整单头库（stb 风格，实现 TU 定义 CHAMINA_IMPLEMENTATION）
+src/                 可编辑源码分片（00_api.h + 01..10 *.cpp，每片 ≤1000 行）
+tools/amalgamate.cpp 单头文件生成器（顺序拼接 + 行数门禁）
 chamina_cli.cpp      CLI 薄壳（渲染 / gen / audio）
 example/main.cpp     最小嵌入示例
 examples/            gift.json 模板、sample.lrc / bird.lrc 歌词、bird.json（gen 产物参考）
 vendor/              四个 vendored 单头依赖
-build.bat            一键构建
+build.bat            一键构建（先生成 chamina.h，再编译）
 README.md            本文件
 TUTORIAL.md          从零出片教程（歌词 → 场景 → 视频）
 PROMPT.md            给 AI 的成片提示词（把需求直接变成 chamina 视频）

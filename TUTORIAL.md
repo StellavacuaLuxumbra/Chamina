@@ -18,9 +18,13 @@
 build.bat
 ```
 
-看到 `[build] smoke ok` 即成功。手动构建：
+看到 `[build] smoke ok` 即成功。`build.bat` 会先编译 `tools/amalgamate.cpp`，
+把 `src/*.cpp` 拼成 `chamina.h`，再编译 CLI；每个源码分片必须 ≤1000 行。
+手动构建：
 
 ```bat
+g++ -O2 -std=c++17 tools/amalgamate.cpp -o dist\amalgamate.exe
+dist\amalgamate.exe
 g++ -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ ^
     -Ivendor chamina_cli.cpp -o dist\chamina-cpp.exe -lshell32
 ```

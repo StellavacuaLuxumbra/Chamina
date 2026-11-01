@@ -17,6 +17,12 @@ if "%GXX%"=="" (
 
 if not exist dist mkdir dist
 
+rem Assemble chamina.h from the <=1000-line chunks in src/ before compiling.
+echo [build] amalgamate src/*.cpp -^> chamina.h
+%GXX% -O2 -std=c++17 -static -static-libgcc -static-libstdc++ ^
+  tools\amalgamate.cpp -o dist/amalgamate.exe || exit /b 1
+dist\amalgamate.exe || exit /b 1
+
 echo [build] %GXX% -O2 -std=c++17 -fopenmp -static -Ivendor chamina_cli.cpp
 %GXX% -O2 -std=c++17 -fopenmp -static -static-libgcc -static-libstdc++ ^
   -Ivendor chamina_cli.cpp -o dist/chamina-cpp.exe -lshell32 || exit /b 1
