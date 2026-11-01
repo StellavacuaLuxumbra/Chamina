@@ -802,6 +802,10 @@ struct World {
         }
         float breath = getenv("CPP_NOVIZ") ? 0.0f : max(intro.at(t), outro.at(t));
         float popacity = 0.9f * (1 + 0.28f * bass * breath);
+        // CPP_SKIP_PARTICLES isolates the always-on blue dust from the rest of
+        // the frame (debugging bloom contamination; same spirit as
+        // CPP_SKIP_CLOUD / CPP_SKIP_STARS).
+        if (!getenv("CPP_SKIP_PARTICLES"))
         for (size_t i = 0; i < cloud.size(); i++) {
             float y = fmodf(cloud[i][1] + t * cloud_extra[i][1] + 45.0f, 70.0f) - 25.0f;
             Vec3 c = follow + Vec3{cloud[i][0], y, cloud[i][2]};

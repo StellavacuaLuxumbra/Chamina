@@ -1666,6 +1666,10 @@ struct World {
         }
         float breath = getenv("CPP_NOVIZ") ? 0.0f : max(intro.at(t), outro.at(t));
         float popacity = 0.9f * (1 + 0.28f * bass * breath);
+        // CPP_SKIP_PARTICLES isolates the always-on blue dust from the rest of
+        // the frame (debugging bloom contamination; same spirit as
+        // CPP_SKIP_CLOUD / CPP_SKIP_STARS).
+        if (!getenv("CPP_SKIP_PARTICLES"))
         for (size_t i = 0; i < cloud.size(); i++) {
             float y = fmodf(cloud[i][1] + t * cloud_extra[i][1] + 45.0f, 70.0f) - 25.0f;
             Vec3 c = follow + Vec3{cloud[i][0], y, cloud[i][2]};
@@ -2921,10 +2925,29 @@ static cloud_kfn cloud_kernel() {
 // resets every pixel). All intermediates persist across frames.
 static void finish(Frame& f, const json& meta, float flash, vector<uint8_t>& bytes) {
     int w = f.w, h = f.h;
+    const char* dbg = getenv("CPP_DEBUG_PIXEL");
+    int dbgx = -1, dbgy = -1;
+    if (dbg) sscanf(dbg, "%d,%d", &dbgx, &dbgy);
+    if (dbgx >= 0 && dbgx < w && dbgy >= 0 && dbgy < h)
+        fprintf(stderr, "[dbg] pre-bloom @%d,%d = %.3f %.3f %.3f\n", dbgx, dbgy,
+                f.color[(size_t)dbgy * w + dbgx][0],
+                f.color[(size_t)dbgy * w + dbgx][1],
+                f.color[(size_t)dbgy * w + dbgx][2]);
     if (meta.at("bloom").value("enabled", false)) {
         static Img bl;
         bloom(f, meta.at("bloom").at("intensity").get<float>(),
               meta.at("bloom").at("threshold").get<float>(), bl);
+        if (dbgx >= 0 && dbgx < w && dbgy >= 0 && dbgy < h) {
+            auto& b = bl[(size_t)dbgy * w + dbgx];
+            fprintf(stderr, "[dbg] bloom-add @%d,%d = %.3f %.3f %.3f\n", dbgx, dbgy,
+                    b[0], b[1], b[2]);
+            float best = -1.0f;
+            size_t bi = 0;
+            for (size_t i = 0; i < bl.size(); i++)
+                if (bl[i][2] > best) { best = bl[i][2]; bi = i; }
+            fprintf(stderr, "[dbg] max blue in bloom = %.3f @%zu,%zu\n", best,
+                    bi % (size_t)w, bi / (size_t)w);
+        }
 #pragma omp parallel for schedule(static)
         for (long i = 0; i < (long)f.color.size(); i++) {
             f.color[i][0] += bl[i][0];
