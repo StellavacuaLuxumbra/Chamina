@@ -169,6 +169,7 @@ dist\chamina-cpp.exe out\soft.json -o out\final.mp4
 
 **排错开关**：`CPP_TRACE=1` 打印相机/文字块状态；`CPP_NOVIZ=1` 关可视化；
 `CPP_SKIP_CLOUD=1` / `CPP_SKIP_STARS=1` 关星云/星点；
+`CPP_SKIP_PARTICLES=1` 关粒子云；
 `CHAMINA_NO_SIMD=1` 退回纯标量（与 SIMD 结果对照）。
 
 ---

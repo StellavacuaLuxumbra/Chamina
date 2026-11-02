@@ -704,15 +704,21 @@ struct World {
                     cam.target.z, cam.roll);
         f.w = w;
         f.h = h;
-        // The dome overwrites every colour pixel when a background is active,
-        // so the colour clear is only needed on a flat-background scene.
+        // The dome overwrites every colour pixel when a background timeline is
+        // active, so the colour clear is only needed on a flat-background scene
+        // (the common "background": "#rrggbb" case). Fill with that colour in
+        // linear space; leaving it black darkened every flat scene.
         // resize (not assign): once sized, later frames write nothing here.
         float pal[12];
         const bool has_bg = eval_backgrounds(meta.value("backgrounds", json::array()), t, pal);
-        if (has_bg)
+        if (has_bg) {
             f.color.resize((size_t)w * h);
-        else
-            f.color.assign((size_t)w * h, {0, 0, 0});
+        } else {
+            float bg[3] = {0, 0, 0};
+            if (meta.contains("background") && meta["background"].is_string())
+                hex_linear(meta["background"].get<string>(), bg);
+            f.color.assign((size_t)w * h, {bg[0], bg[1], bg[2]});
+        }
         f.depth.assign((size_t)w * h, INFINITY);
         if (has_bg) {
             // sRGB → linear for the shader-space math

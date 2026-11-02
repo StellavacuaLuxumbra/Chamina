@@ -133,6 +133,7 @@ int main() {
 | `CPP_NOVIZ=1` | 关闭音频可视化组件（隔离文字/背景问题） |
 | `CPP_PROF=1` | 渲染结束打印 render/finish 每帧毫秒数（`[prof]` 行） |
 | `CPP_SKIP_CLOUD=1` / `CPP_SKIP_STARS=1` | 分别关闭星云 / 星点（排查 skydome） |
+| `CPP_SKIP_PARTICLES=1` | 关闭常驻淡蓝粒子云（排查 bloom / 背景污染） |
 | `CHAMINA_NO_SIMD=1` | 强制全标量路径（与 SIMD 版对照排错） |
 | `CHAMINA_FFMPEG` | ffmpeg 完整路径（默认找 PATH） |
 
@@ -142,10 +143,13 @@ int main() {
 
 | 口径 | 数值 |
 |---|---|
-| render（fx-on，含 skydome） | **28.7 ms/帧** |
-| └ skydome 子段 | 15.9 ms/帧 |
-| finish（bloom/DOF/ACES/grade/pack） | 47.5 ms/帧 |
-| 视频整段（60 帧交替配对） | **8.3 fps** |
+| render（`gift.json`，3 行大字） | **26.8 ms/帧** |
+| render（`bird.json`，单行字） | 8.9 ms/帧 |
+| finish（bloom/DOF/ACES/grade/pack） | 81.3 ms/帧 |
+| 视频整段（30–40 帧，H.264 编码） | **6.2 fps** |
+
+finish 比早期版本高，是因为 bloom/DOF 的高斯模糊从「仅垂直」修成了
+可分离二维卷积；这是正确性修复，不是回退。
 
 SIMD 说明：AVX2 内核在运行时按 CPU 能力分发（`__builtin_cpu_supports`），
 数值政策分两级——位精确内核（tonemap/grade/skydome 全幅/云场 prepass，

@@ -262,15 +262,22 @@ static inline float aces_fit(float v) {
 }
 
 static array<float, 3> tonemap_srgb(const array<float, 3>& c) {
-    const float M[3][3] = {{0.59719f, 0.07600f, 0.02840f},
-                           {0.35458f, 0.90834f, 0.13383f},
-                           {0.04823f, 0.01566f, 0.83777f}};
-    const float MO[3][3] = {{1.60475f, -0.10208f, -0.00327f},
-                            {-0.53108f, 1.10813f, -0.07276f},
-                            {-0.07367f, -0.00605f, 1.07602f}};
+    // three.js ACESFilmicToneMapping, in the shader's effective row order:
+    // the GLSL mat3(...) constants are columns, so the rows below are the
+    // transposes of the vectors written in tonemapping_pars_fragment.glsl.js.
+    // The port originally used the columns as rows and dropped the /0.6
+    // exposure, which made over-bright warm colours tone-map magenta.
+    const float M[3][3] = {{0.59719f, 0.35458f, 0.04823f},
+                           {0.07600f, 0.90834f, 0.01566f},
+                           {0.02840f, 0.13383f, 0.83777f}};
+    const float MO[3][3] = {{1.60475f, -0.53108f, -0.07367f},
+                            {-0.10208f, 1.10813f, -0.00605f},
+                            {-0.00327f, -0.07276f, 1.07602f}};
+    const float exposure = 1.0f / 0.6f; // three.js: toneMappingExposure / 0.6
+    float r = c[0] * exposure, g = c[1] * exposure, b = c[2] * exposure;
     float fitted[3];
     for (int i = 0; i < 3; i++)
-        fitted[i] = aces_fit(c[0] * M[i][0] + c[1] * M[i][1] + c[2] * M[i][2]);
+        fitted[i] = aces_fit(r * M[i][0] + g * M[i][1] + b * M[i][2]);
     array<float, 3> out;
     for (int i = 0; i < 3; i++) {
         float v = clamp(fitted[0] * MO[i][0] + fitted[1] * MO[i][1] + fitted[2] * MO[i][2],
@@ -399,25 +406,33 @@ static void tonemap_rows_avx2(const float* src, float* dst, size_t n) {
     size_t i = 0;
     for (; i + 8 <= n; i += 8) {
         __m256i base = _mm256_add_epi32(kstride, _mm256_set1_epi32((int)(i * 3)));
-        __m256 c0 = _mm256_i32gather_ps(src, base, 4);
-        __m256 c1 = _mm256_i32gather_ps(src, _mm256_add_epi32(base, kone), 4);
-        __m256 c2 = _mm256_i32gather_ps(src, _mm256_add_epi32(base, ktwo), 4);
+        // three.js ACES: colour *= exposure/0.6, then the input matrix (rows
+        // below are the transpose of the GLSL vec3 columns), fit, output
+        // matrix. Mirrors tonemap_srgb's op order for the Tier A byte gate.
+        __m256 c0 = _mm256_mul_ps(
+            _mm256_i32gather_ps(src, base, 4), _mm256_set1_ps(1.0f / 0.6f));
+        __m256 c1 = _mm256_mul_ps(
+            _mm256_i32gather_ps(src, _mm256_add_epi32(base, kone), 4),
+            _mm256_set1_ps(1.0f / 0.6f));
+        __m256 c2 = _mm256_mul_ps(
+            _mm256_i32gather_ps(src, _mm256_add_epi32(base, ktwo), 4),
+            _mm256_set1_ps(1.0f / 0.6f));
         // fitted[j] = c0*M[j][0] + c1*M[j][1] + c2*M[j][2], mul/add order unchanged
-        __m256 f0 = (c0 * _mm256_set1_ps(0.59719f) + c1 * _mm256_set1_ps(0.07600f)) +
-                    c2 * _mm256_set1_ps(0.02840f);
-        __m256 f1 = (c0 * _mm256_set1_ps(0.35458f) + c1 * _mm256_set1_ps(0.90834f)) +
-                    c2 * _mm256_set1_ps(0.13383f);
-        __m256 f2 = (c0 * _mm256_set1_ps(0.04823f) + c1 * _mm256_set1_ps(0.01566f)) +
+        __m256 f0 = (c0 * _mm256_set1_ps(0.59719f) + c1 * _mm256_set1_ps(0.35458f)) +
+                    c2 * _mm256_set1_ps(0.04823f);
+        __m256 f1 = (c0 * _mm256_set1_ps(0.07600f) + c1 * _mm256_set1_ps(0.90834f)) +
+                    c2 * _mm256_set1_ps(0.01566f);
+        __m256 f2 = (c0 * _mm256_set1_ps(0.02840f) + c1 * _mm256_set1_ps(0.13383f)) +
                     c2 * _mm256_set1_ps(0.83777f);
         f0 = aces_fit_lanes256(f0, lutA);
         f1 = aces_fit_lanes256(f1, lutA);
         f2 = aces_fit_lanes256(f2, lutA);
         // v[i] = clamp(f0*MO[i][0] + f1*MO[i][1] + f2*MO[i][2], 0, 1) → srgb LUT
-        __m256 v0 = ((f0 * _mm256_set1_ps(1.60475f) + f1 * _mm256_set1_ps(-0.10208f)) +
-                     f2 * _mm256_set1_ps(-0.00327f));
-        __m256 v1 = ((f0 * _mm256_set1_ps(-0.53108f) + f1 * _mm256_set1_ps(1.10813f)) +
-                     f2 * _mm256_set1_ps(-0.07276f));
-        __m256 v2 = ((f0 * _mm256_set1_ps(-0.07367f) + f1 * _mm256_set1_ps(-0.00605f)) +
+        __m256 v0 = ((f0 * _mm256_set1_ps(1.60475f) + f1 * _mm256_set1_ps(-0.53108f)) +
+                     f2 * _mm256_set1_ps(-0.07367f));
+        __m256 v1 = ((f0 * _mm256_set1_ps(-0.10208f) + f1 * _mm256_set1_ps(1.10813f)) +
+                     f2 * _mm256_set1_ps(-0.00605f));
+        __m256 v2 = ((f0 * _mm256_set1_ps(-0.00327f) + f1 * _mm256_set1_ps(-0.07276f)) +
                      f2 * _mm256_set1_ps(1.07602f));
         v0 = srgb_encode_lanes256(v0, lutS);
         v1 = srgb_encode_lanes256(v1, lutS);

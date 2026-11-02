@@ -3,7 +3,7 @@
   "height": 1080,
   "fps": 60,
   "duration": 7,
-  "background": "#05060f",
+  "background": "#041826",
   "hdr": true,
   "fxaa": false,
   "work_dir": "target/chamina",
@@ -15,8 +15,8 @@
   ],
   "bloom": {
     "enabled": true,
-    "intensity": 0.3,
-    "threshold": 1.0,
+    "intensity": 0.15,
+    "threshold": 0.9,
     "scale": 1.2,
     "high_quality": true
   },

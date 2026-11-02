@@ -139,3 +139,4 @@ dist\chamina-cpp.exe out\scene.json --audio-env out\audio_env.json -o out\final.
 | 太慢 | 降 fps/分辨率、关 dof、`--frames` 先出片段 |
 | 想对照 SIMD | `CHAMINA_NO_SIMD=1` |
 | 星云/星点排查 | `CPP_SKIP_CLOUD=1` / `CPP_SKIP_STARS=1` |
+| 粒子/bloom 排查 | `CPP_SKIP_PARTICLES=1` |
