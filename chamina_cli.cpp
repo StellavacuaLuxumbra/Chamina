@@ -71,6 +71,10 @@ int main(int argc, char** argv) {
                         "       chamina-cpp audio <audio-file> -o audio_env.json\n");
         return 1;
     }
+    if (still >= 0 && png.empty()) {
+        fprintf(stderr, "error: --still requires --png <file>\n");
+        return 1;
+    }
 
     // scene/audio-env read through chamina::read_file: MinGW's
     // ifstream(char*) opens via the ANSI codepage and fails on Chinese paths.

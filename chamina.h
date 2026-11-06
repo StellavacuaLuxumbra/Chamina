@@ -6791,6 +6791,11 @@ int engine_encode_video(Engine* e, unsigned from, unsigned frames, const char* o
     try {
         int w = e->w, h = e->h;
         unsigned fps = e->fps, total = e->total;
+        if (from >= total) {
+            fprintf(stderr, "[cpp] ERROR: --from %u is past the last frame (total %u)\n",
+                    from, total);
+            return 1;
+        }
         unsigned count = frames ? frames : total - from;
         count = min(count, total - from);
 
