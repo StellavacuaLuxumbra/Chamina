@@ -6764,7 +6764,12 @@ int engine_still_png(Engine* e, float t, const char* png_path) {
             return 1;
         }
         {
-            ofstream f(filesystem::u8path(png), ios::binary);
+            // Fresh checkouts have no out/ directory; create the parent so the
+            // documented CLI invocations work without a manual mkdir.
+            error_code ec;
+            filesystem::path op = filesystem::u8path(png);
+            if (op.has_parent_path()) filesystem::create_directories(op.parent_path(), ec);
+            ofstream f(op, ios::binary);
             if (!f || !f.write((const char*)png_bytes.data(), (streamsize)png_bytes.size())) {
                 fprintf(stderr, "[cpp] ERROR: cannot write %s\n", png.c_str());
                 return 1;
@@ -6789,6 +6794,12 @@ int engine_encode_video(Engine* e, unsigned from, unsigned frames, const char* o
         unsigned count = frames ? frames : total - from;
         count = min(count, total - from);
 
+        {
+            // ffmpeg cannot create the output directory itself.
+            error_code ec;
+            filesystem::path op = filesystem::u8path(out);
+            if (op.has_parent_path()) filesystem::create_directories(op.parent_path(), ec);
+        }
         VideoPipe vpipe;
         if (!vpipe.start(w, h, fps, out)) {
             fprintf(stderr, "cannot start ffmpeg\n");
