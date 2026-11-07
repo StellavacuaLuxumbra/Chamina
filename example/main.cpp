@@ -18,6 +18,16 @@
 using namespace std;
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // cmd.exe/PowerShell hand argv over in the ANSI codepage; re-decode to
+    // UTF-8 so Chinese paths survive on their way into the JSON reader.
+    int nargc = argc;
+    char** nargs = chamina::argv_utf8(argc, argv, &nargc);
+    if (nargs) {
+        argc = nargc;
+        argv = nargs;
+    }
+#endif
     const char* scene_path = argc > 1 ? argv[1] : "examples/bird.json";
     const char* env_path   = argc > 2 ? argv[2] : "";
     const char* out_path   = argc > 3 ? argv[3] : "example.png";
